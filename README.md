@@ -6,4 +6,4 @@ numpy, tensorflow, pandas, json, ConfigParser, progress
 
 ## Usage
 
-```make iccad\%_test'''
+ ```make iccad%_test```
