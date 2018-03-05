@@ -8,7 +8,7 @@ numpy, tensorflow, pandas, json, ConfigParser, progress
 
 e.g. to test iccad1 of dac17, you need to modify iccad1\_config.ini
 
-set ```model\_path=./models/iccad1/bl/model.ckpt```
+set ```model_path=./models/iccad1/bl/model.ckpt```
 
 set ```aug=0``` and
 
@@ -18,7 +18,7 @@ set ```aug=0``` and
 
  e.g. to train iccad1 of dac17, you need to modify iccad1\_config.ini
 
-set ```save\_path=./models/iccad1/bl/model.ckpt```
+set ```save_path=./models/iccad1/bl/model.ckpt```
 
 set ```aug=0``` and 
 
