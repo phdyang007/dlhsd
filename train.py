@@ -45,7 +45,7 @@ bs     = 32   #training batch size
 
 l_step = 5    #display step
 c_step = 500 #check point step
-d_step = 20000 #lr decay step
+d_step = 3000 #lr decay step
 ckpt   = True
 
 '''
