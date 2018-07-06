@@ -36,7 +36,9 @@ accu   = tf.equal(y, tf.cast(tf.argmax(y_gt, 1), tf.int32))                     
 accu   = tf.reduce_mean(tf.cast(accu, tf.float32))
 gs     = tf.Variable(initial_value=0, trainable=False, dtype=tf.int32)       #define global step
 #lr     = tf.train.exponential_decay(0.001, gs, decay_steps=20000, decay_rate = 0.65, staircase = True) #initial learning rate and lr decay
-lr     = tf.constant(0.0003)
+lr_holder = tf.placeholder(tf.float32, shape=[])
+lr     = 0.001 #initial learning rate and lr decay
+opt    = tf.train.AdamOptimizer(lr_holder, beta1=0.9)
 dr     = 0.65 #learning rate decay rate
 opt    = tf.train.AdamOptimizer(lr, beta1=0.9)
 opt    = opt.minimize(loss, gs)
@@ -70,8 +72,8 @@ with tf.Session(config=config) as sess:
         batch_label_all_with_bias = processlabel(batch_label, delta1 = delta1)
         training_loss, learning_rate, training_acc = \
             loss.eval(feed_dict={x_data: batch_data, y_gt: batch_label_all_without_bias}), \
-            sess.run(lr), accu.eval(feed_dict={x_data:batch_data, y_gt:batch_label_all_without_bias})
-        opt.run(feed_dict={x_data: batch_data, y_gt: batch_label_all_with_bias})
+            lr, accu.eval(feed_dict={x_data:batch_data, y_gt:batch_label_all_without_bias})
+        opt.run(feed_dict={x_data: batch_data, y_gt: batch_label_all_with_bias, lr_holder: lr})
         if step % l_step == 0:
             format_str = ('%s: step %d, loss = %.2f, learning_rate = %f, training_accu = %f, nhs_loss = %.2f, bias = %.2f')
             print (format_str % (datetime.now(), step, training_loss, learning_rate, training_acc, nhs_loss, delta1))

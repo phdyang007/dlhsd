@@ -33,8 +33,9 @@ y      = tf.cast(tf.argmax(predict, 1), tf.int32)
 accu   = tf.equal(y, tf.cast(tf.argmax(y_gt, 1), tf.int32))                                                    #calc batch accu
 accu   = tf.reduce_mean(tf.cast(accu, tf.float32))
 gs     = tf.Variable(initial_value=0, trainable=False, dtype=tf.int32)       #define global step
-lr     = tf.constant(0.001) #initial learning rate and lr decay
-opt    = tf.train.AdamOptimizer(lr, beta1=0.9)
+lr_holder = tf.placeholder(tf.float32, shape=[])
+lr     = 0.001 #initial learning rate and lr decay
+opt    = tf.train.AdamOptimizer(lr_holder, beta1=0.9)
 opt    = opt.minimize(loss, gs)
 maxitr = 10000
 bs     = 32   #training batch size
@@ -71,8 +72,8 @@ with tf.Session(config=config) as sess:
         batch_label_all_with_bias = processlabel(batch_label, delta1 = delta1)
         training_loss, learning_rate, training_acc = \
             loss.eval(feed_dict={x_data: batch_data, y_gt: batch_label_all_without_bias}), \
-            sess.run(lr), accu.eval(feed_dict={x_data:batch_data, y_gt:batch_label_all_without_bias})
-        opt.run(feed_dict={x_data: batch_data, y_gt: batch_label_all_with_bias})
+            lr, accu.eval(feed_dict={x_data:batch_data, y_gt:batch_label_all_without_bias})
+        opt.run(feed_dict={x_data: batch_data, y_gt: batch_label_all_with_bias, lr_holder: lr})
         if step % l_step == 0:
             format_str = ('%s: step %d, loss = %.2f, learning_rate = %f, training_accu = %f, bias = %.2f')
             print (format_str % (datetime.now(), step, training_loss, learning_rate, training_acc, delta1))
