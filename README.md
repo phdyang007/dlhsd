@@ -2,7 +2,7 @@
 
 ## Dependencies
 
-numpy, tensorflow 1.3, pandas, json, ConfigParser, progress
+numpy, tensorflow (tested on 1.3 and 1.9), pandas, json, ConfigParser, progress
 
 ## Test
 
