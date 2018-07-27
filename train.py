@@ -40,7 +40,7 @@ lr_holder = tf.placeholder(tf.float32, shape=[])
 lr     = 0.001 #initial learning rate and lr decay
 opt    = tf.train.AdamOptimizer(lr_holder, beta1=0.9)
 dr     = 0.65 #learning rate decay rate
-opt    = tf.train.AdamOptimizer(lr, beta1=0.9)
+
 opt    = opt.minimize(loss, gs)
 maxitr = 10000
 bs     = 32   #training batch size
