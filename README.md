@@ -1,5 +1,9 @@
 # DLHSD
 
+## Dataset
+
+Feature Tensor Extraction Data is already within this repo, original images can be found at http://appsrv.cse.cuhk.edu.hk/~hyyang/files/iccad-official.tgz
+
 ## Dependencies
 
 numpy, tensorflow (tested on 1.3 and 1.9), pandas, json, ConfigParser, progress
@@ -29,3 +33,4 @@ use ```train.py``` if you want to see some results of the TCAD extension
 ## Updates
 
 -20180705: Fix a bug that learning rate does not decay properly which might cause unstable results.
+-20170827: Add the link of original images of layouts from the  ICCAD benchmark (resolution: 1nm).
