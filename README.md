@@ -36,7 +36,7 @@ use ```train.py``` if you want to see some results of the TCAD extension
 
 ## Updates
 
--20190326: Transferred to Python 3.x
+-20190326: Transferred to Python 3.x (If you want python2 version please find at tag dlhsd-py2)
 
 -20181220: Add script for feature tensor extraction.
 
