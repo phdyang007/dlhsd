@@ -1,5 +1,5 @@
 from model import *
-import ConfigParser as cp
+import configparser as cp
 import sys
 import time
 import os
@@ -58,8 +58,8 @@ with tf.Session(config=config) as sess:
     ahs = 0   #actual hs
     anhs= 0   #actual hs
     start   = time.time()
-    bar = Bar('Detecting', max=test_data.maxlen/1000+1)
-    for titr in xrange(0, test_data.maxlen/1000+1):
+    bar = Bar('Detecting', max=test_data.maxlen//1000+1)
+    for titr in range(0, test_data.maxlen//1000+1):
         if not titr == test_data.maxlen/1000:
             tbatch = test_data.nextbatch(1000, fealen)
         else:
@@ -75,14 +75,14 @@ with tf.Session(config=config) as sess:
         anhs+= sum(tmp_label==0)
         bar.next()
     bar.finish()
-    print chs, ahs, cnhs, anhs
+    print (chs, ahs, cnhs, anhs)
     if not ahs ==0:
         hs_accu = 1.0*chs/ahs
     else:
         hs_accu = 0
     fs      = anhs - cnhs
     end       = time.time()
-print ahs, anhs
+print (ahs, anhs)
 print('Hotspot Detection Accuracy is %f'%hs_accu)
 print('False Alarm is %f'%fs)
 print('Test Runtime is %f seconds'%(end-start))

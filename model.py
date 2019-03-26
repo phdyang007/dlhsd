@@ -363,7 +363,7 @@ class data:
                             try:
                                 temp_fea.append(np.concatenate((a,b)))
                             except:
-                                print a.shape, b.shape, self.ptr
+                                print (a.shape, b.shape, self.ptr)
                     else:
                         file='/ac'+str(i)+'.csv'
                         path=self.dat+file
@@ -379,7 +379,7 @@ class data:
                             try:
                                 temp_fea.append(np.concatenate((a,b)))
                             except:
-                                print a.shape, b.shape, self.ptr
+                                print (a.shape, b.shape, self.ptr)
             self.ptr=self.ptr+batch-self.maxlen
         #print np.asarray(temp_fea).shape
         return np.rollaxis(np.asarray(temp_fea), 0, 3)[:,:,0:channel], label

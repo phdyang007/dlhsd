@@ -6,7 +6,7 @@ Feature Tensor Extraction Data is already within this repo, original images can 
 
 ## Dependencies
 
-numpy, tensorflow (tested on 1.3 and 1.9), pandas, json, ConfigParser, progress
+numpy, tensorflow (tested on 1.3 and 1.9), pandas, json, ConfigParser (configparser for python 3), progress
 
 ## Feature Tensor Extraction
 
@@ -35,6 +35,8 @@ set ```aug=0``` and
 use ```train.py``` if you want to see some results of the TCAD extension
 
 ## Updates
+
+-20190326: Transferred to Python 3.x
 
 -20181220: Add script for feature tensor extraction.
 
