@@ -60,7 +60,7 @@ with tf.Session(config=config) as sess:
     start   = time.time()
     bar = Bar('Detecting', max=test_data.maxlen//1000+1)
     for titr in range(0, test_data.maxlen//1000+1):
-        if not titr == test_data.maxlen/1000:
+        if not titr == test_data.maxlen//1000:
             tbatch = test_data.nextbatch(1000, fealen)
         else:
             tbatch = test_data.nextbatch(test_data.maxlen-titr*1000, fealen)
