@@ -1,5 +1,8 @@
 from model import *
-import ConfigParser as cp
+try:
+    import ConfigParser as cp
+except:
+    import configparser as cp
 import sys
 import os
 from datetime import datetime
@@ -60,7 +63,7 @@ with tf.Session(config=config) as sess:
     sess.run(tf.global_variables_initializer())
     saver    = tf.train.Saver(max_to_keep=400)
 
-    for step in xrange(maxitr):
+    for step in range(maxitr):
         batch = train_data.sgd_batch(bs, fealen)
         batch_data = batch[0]
         batch_label= batch[1]

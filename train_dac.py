@@ -1,5 +1,8 @@
 from model import *
-import ConfigParser as cp
+try:
+    import ConfigParser as cp
+except:
+    import configparser as cp
 import sys
 import os
 from datetime import datetime
@@ -55,7 +58,7 @@ with tf.Session(config=config) as sess:
     saver    = tf.train.Saver(max_to_keep=150)
 
 	#lr     = tf.train.exponential_decay(0.0005, gs, decay_steps=10000, decay_rate = 0.65, staircase = True)
-    for step in xrange(maxitr):
+    for step in range(maxitr):
         batch = train_data.nextbatch_beta(bs, fealen)
         batch_data = batch[0]
         batch_label= batch[1]

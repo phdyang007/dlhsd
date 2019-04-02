@@ -25,7 +25,7 @@ def readcsv_(target, fealen=32):
     #read feature
     feature = []
     for dirname, dirnames, filenames in os.walk(target):
-        for i in xrange(0, len(filenames)-1):
+        for i in range(0, len(filenames)-1):
             if i==0:
                 file = '/dc.csv'
                 path = target + file
@@ -44,7 +44,7 @@ def readcsv(target, fealen=32):
     #read feature
     feature = []
     for dirname, dirnames, filenames in os.walk(target):
-        for i in xrange(0, len(filenames)-1):
+        for i in range(0, len(filenames)-1):
             if i==0:
                 file = '/dc.csv'
                 path = target + file
@@ -208,7 +208,7 @@ class data:
             print('Abort.')
             quit()
         else:
-            num = batch / 2
+            num = batch // 2
         idxn = labexn[(np.random.rand(num)*n_length).astype(int)]
         idxh = labexh[(np.random.rand(num)*h_length).astype(int)]
         label = np.concatenate((np.zeros(num), np.ones(num)))
@@ -231,7 +231,7 @@ class data:
             print('Abort.')
             quit()
         else:
-            num = batch / 2
+            num = batch // 2
         idxn = labexn[(np.random.rand(num)*n_length).astype(int)]
         idxh = labexh[(np.random.rand(num)*h_length).astype(int)]
         label = np.concatenate((np.zeros(num), np.ones(num)))
@@ -262,7 +262,7 @@ class data:
             print('Abort.')
             quit()
         else:
-            num = batch/2
+            num = batch//2
             if num>=n_length or num>=h_length:
                 print('ERROR:Batch size exceeds data size')
                 print('Abort.')
