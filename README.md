@@ -10,6 +10,8 @@ numpy, tensorflow (tested on 1.3 and 1.9), pandas, json, ConfigParser (configpar
 
 ## Feature Tensor Extraction
 
+-Currently, FTE source code is applicable on Python 2 only.
+
 ```python feature.py str<image_folder> str<output_feature_folder> int<block_size> int<block_dim> int<feature_length>```
 
 ## Test
