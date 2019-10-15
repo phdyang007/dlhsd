@@ -6,9 +6,11 @@ import random
 import csv
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
+from scipy.misc import imread
 from time import time
 import json
 import pandas as pd 
+import math
 
 '''
     readcsv: Read feature tensors from csv data packet
@@ -98,15 +100,135 @@ def loss_to_bias(loss,  alpha, threshold=0.3):
         scope: undetermined
     return: prediction socre(s) of input batch
 '''
-def forward(input, is_training=True, reuse=False, scope='model', flip=False):
-    if flip == True:
-        input = tf.map_fn(lambda img: tf.image.random_flip_left_right(img), input)
-        input = tf.map_fn(lambda img: tf.image.random_flip_up_down(img), input)
+def get_one(test_file_list, id):
+    img = imread(test_file_list[id].split()[0])
+    label = int(test_file_list[id].split()[1])
+
+    return np.expand_dims(np.expand_dims(img, axis = 0), axis = -1), label
+
+def get_data(train_file_list):
+    datalen = len(train_file_list)
+    datalist = []
+    labellist = []
+
+    for i in range(datalen):
+        datalist.append(train_file_list[i].split()[0])
+        labellist.append(int(train_file_list[i].split()[1]))
+    
+    return np.array(datalist), np.array(labellist)
+
+
+def get_batch(data_list, label_list, batch_size):
+
+    hs_idx = np.where(label_list==1)[0]
+    nhs_idx = np.where(label_list==0)[0]
+
+
+    half_bs = batch_size//2
+
+    hs_batch = random.sample(range(len(hs_idx)), half_bs)
+    nhs_batch = random.sample(range(len(nhs_idx)), half_bs)
+
+    datalist = np.concatenate((data_list[hs_idx[hs_batch]], data_list[nhs_idx[nhs_batch]]))
+    batch_label = np.zeros(batch_size)
+    batch_label[:half_bs]=1
+    for i in range(batch_size):
+        tmp = imread(datalist[i])
+        tmp = np.expand_dims(tmp, axis = 0)
+        if i == 0:
+            batch_data = tmp
+        else:
+            batch_data = np.concatenate((batch_data, tmp), axis = 0)
+
+    batch_data = batch_data/255
+
+    batch_data_nhs = batch_data[half_bs:]
+    batch_data_label_nhs = batch_label[half_bs:]
+
+    return np.expand_dims(batch_data, axis=-1), batch_label, np.expand_dims(batch_data_nhs, axis=-1), batch_data_label_nhs
+
+def get_dct_kernel(block_size, fealen):
+    kernel = np.zeros((block_size, block_size, fealen), dtype=float)
+    c=0
+    for i in range(block_size):
+            for j in range(i+1):
+                if c<fealen:
+                    #print(c)
+                    for x in range(block_size):
+                        for y in range(block_size):
+                            kernel[x,y,c]=math.cos(math.pi/block_size*(x+0.5)*i)*math.cos(math.pi/block_size*(y+0.5)*j)
+                    c+=1
+
+    
+    print("dct_kernel_size is ", kernel.shape)
+    return np.expand_dims(kernel, axis = 2)
+
+def forward_dct(input, dct_kernel, is_training=True, reuse=tf.AUTO_REUSE, scope='model'):
 
     with tf.variable_scope(scope, reuse=reuse):
         with slim.arg_scope([slim.conv2d], activation_fn=tf.nn.relu, stride=1, padding='SAME',
                             weights_initializer=tf.contrib.layers.xavier_initializer(uniform=False),
                             biases_initializer=tf.constant_initializer(0.0)):
+
+            net = tf.nn.conv2d(input, dct_kernel, strides = [1, dct_kernel.shape[0], dct_kernel.shape[1], 1], padding = 'VALID')
+            net = slim.conv2d(net, 16, [3, 3], scope='conv1_1')
+            net = slim.conv2d(net, 16, [3, 3], scope='conv1_2')
+            net = slim.max_pool2d(net, [2, 2], stride=2, padding='SAME', scope='pool1')
+            net = slim.conv2d(net, 32, [3, 3], scope='conv2_1')
+            net = slim.conv2d(net, 32, [3, 3], scope='conv2_2')
+            net = slim.max_pool2d(net, [2, 2], stride=2, padding='SAME', scope='pool2')
+            net = slim.flatten(net)
+            w_init = tf.contrib.layers.xavier_initializer(uniform=False)
+            net = slim.fully_connected(net, 250, activation_fn=tf.nn.relu, scope='fc1')
+            net = slim.dropout(net, 0.5, is_training=is_training, scope='dropout')
+            predict = slim.fully_connected(net, 2, activation_fn=None, scope='fc2')
+    return predict
+
+
+
+def forward_spie(input, is_training=True, reuse=tf.AUTO_REUSE, scope='model'):
+
+    with tf.variable_scope(scope, reuse=reuse):
+        with slim.arg_scope([slim.conv2d], activation_fn=tf.nn.relu, stride=1, padding='SAME',
+                            weights_initializer=tf.contrib.layers.xavier_initializer(uniform=False),
+                            biases_initializer=tf.constant_initializer(0.0)):
+            net = slim.conv2d(input, 4, kernel_size=[3,3], stride=2, padding='SAME', scope='conv0_1')
+            net = slim.conv2d(net, 4, kernel_size=[3,3], stride=2, padding='SAME', scope='conv0_2')
+            #net = slim.max_pool2d(net, [2, 2], stride=2, scope='pool0_1')
+            for cs in range(3):
+                for ci in range(3):
+                    net = slim.conv2d(net, 8*(2**cs), [3, 3], scope='conv'+str(cs+1)+'_'+str(ci+1))
+                    #net = slim.batch_norm(net, center=True, scale=True, activation_fn=tf.nn.relu, is_training=is_training, updates_collections=None, reuse=reuse, scope='bn'+str(cs+1)+'_'+str(ci+1))
+                net = slim.max_pool2d(net, [2, 2], stride=2, scope='pool'+str(cs+1))
+            for ci in range(3):
+                net = slim.conv2d(net, 32, [3, 3], scope='conv5_'+str(ci+1))
+            net   = slim.max_pool2d(net, [2, 2], stride=2, scope='pool6')
+            # TODO: complete the baseline model structure
+
+
+            # Flatten the feature map of pool6 into a feature vector
+            net = slim.flatten(net)
+            # Please check them carefully when you modify
+            w_init = tf.contrib.layers.xavier_initializer(uniform=False)
+            net = slim.fully_connected(net, 1024, scope='fc7', activation_fn=tf.nn.relu)
+            #fc7 = slim.batch_norm(fc7, center=True, scale=True, activation_fn=tf.nn.relu, is_training=is_training, updates_collections=None, reuse=reuse, scope='bnfc7')
+            net = slim.dropout(net, keep_prob=0.5, is_training=is_training, scope='drop7')
+            net = slim.fully_connected(net, 256, scope='fc8', activation_fn=tf.nn.relu)
+            #fc8 = slim.batch_norm(fc8, center=True, scale=True, activation_fn=tf.nn.relu, is_training=is_training, updates_collections=None, reuse=reuse, scope='bnfc8')
+            net = slim.dropout(net, keep_prob=0.5, is_training=is_training, scope='drop8')
+            predict = slim.fully_connected(net, 2, activation_fn=None, scope='predict')
+    return predict
+
+
+
+def forward(input, is_training=True, reuse=tf.AUTO_REUSE, scope='model'):
+
+    with tf.variable_scope(scope, reuse=reuse):
+        with slim.arg_scope([slim.conv2d], activation_fn=tf.nn.relu, stride=1, padding='SAME',
+                            weights_initializer=tf.contrib.layers.xavier_initializer(uniform=False),
+                            biases_initializer=tf.constant_initializer(0.0)):
+
+            #net = tf.nn.conv2d(input, dct_kernel, strides = [1, dct_kernel.shape[0], dct_kernel.shape[1], 1], padding = 'SAME')
             net = slim.conv2d(input, 16, [3, 3], scope='conv1_1')
             net = slim.conv2d(net, 16, [3, 3], scope='conv1_2')
             net = slim.max_pool2d(net, [2, 2], stride=2, padding='SAME', scope='pool1')

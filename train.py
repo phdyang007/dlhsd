@@ -17,20 +17,18 @@ train_path = infile.get('dir','train_path')
 save_path = infile.get('dir','save_path')
 fealen     = int(infile.get('feature','ft_length'))
 blockdim   = int(infile.get('feature','block_dim'))
-aug        = int(infile.get('feature','aug'))
+imgdim = int(infile.get('feature','img_dim'))
 '''
 Prepare the Optimizer
 '''
-train_data = data(train_path, train_path+'/label.csv', preload=True)
-
-x_data = tf.placeholder(tf.float32, shape=[None, blockdim*blockdim, fealen])              #input FT
+train_list = open(train_path).readlines()
+data_list, label_list = get_data(train_list)
+dct_kernel = get_dct_kernel(imgdim//blockdim, fealen)
+x_data = tf.placeholder(tf.float32, shape=[None, imgdim, imgdim, 1])              #input FT
 y_gt   = tf.placeholder(tf.float32, shape=[None, 2])                                      #ground truth label
                                      #ground truth label without bias
-x      = tf.reshape(x_data, [-1, blockdim, blockdim, fealen])                             #reshap to NHWC
-if aug==1:
-    predict= forward(x, flip=True)   
-else:
-    predict= forward(x)                                                        #do forward
+                        #reshap to NHWC
+predict= forward_spie(x_data)                                                        #do forward
 loss   = tf.nn.softmax_cross_entropy_with_logits(labels=y_gt, logits=predict) 
 loss   = tf.reduce_mean(loss)                                                             #calc batch loss
                                                           #calc batch loss without bias
@@ -40,13 +38,13 @@ accu   = tf.reduce_mean(tf.cast(accu, tf.float32))
 gs     = tf.Variable(initial_value=0, trainable=False, dtype=tf.int32)       #define global step
 #lr     = tf.train.exponential_decay(0.001, gs, decay_steps=20000, decay_rate = 0.65, staircase = True) #initial learning rate and lr decay
 lr_holder = tf.placeholder(tf.float32, shape=[])
-lr     = 0.001 #initial learning rate and lr decay
+lr     = 0.0005 #initial learning rate and lr decay
 opt    = tf.train.AdamOptimizer(lr_holder, beta1=0.9)
 dr     = 0.65 #learning rate decay rate
 
 opt    = opt.minimize(loss, gs)
 maxitr = 10000
-bs     = 32   #training batch size
+bs     = 8  #training batch size
 
 l_step = 5    #display step
 c_step = 500 #check point step
@@ -58,20 +56,20 @@ Start the training
 '''
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
-config.gpu_options.per_process_gpu_memory_fraction = 0.44
+
 with tf.Session(config=config) as sess:
     sess.run(tf.global_variables_initializer())
     saver    = tf.train.Saver(max_to_keep=400)
 
     for step in range(maxitr):
-        batch = train_data.sgd_batch(bs, fealen)
+        batch = get_batch(data_list, label_list, bs)
         batch_data = batch[0]
         batch_label= batch[1]
         batch_nhs  = batch[2]
         batch_label_all_without_bias = processlabel(batch_label)
         batch_label_nhs_without_bias = processlabel(batch[3])
         nhs_loss = loss.eval(feed_dict={x_data: batch_nhs, y_gt: batch_label_nhs_without_bias})
-        delta1 = loss_to_bias(nhs_loss, 6,)
+        delta1 = 0
         batch_label_all_with_bias = processlabel(batch_label, delta1 = delta1)
         training_loss, learning_rate, training_acc = \
             loss.eval(feed_dict={x_data: batch_data, y_gt: batch_label_all_without_bias}), \
@@ -83,5 +81,5 @@ with tf.Session(config=config) as sess:
         if step % c_step == 0 and ckpt and step > 0:
             path = save_path + 'model-'+str(step)+'-'+'.ckpt'
             saver.save(sess, path)
-        if step % d_step == 0 and step >0:
-            lr = lr * dr
+        #if step % d_step == 0 and step >0:
+        #    lr = lr * dr
