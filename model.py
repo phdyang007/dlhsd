@@ -11,6 +11,92 @@ from time import time
 import json
 import pandas as pd 
 import math
+from PIL import Image
+from scipy.fftpack import dct
+
+
+#
+#
+#
+#
+
+def get_feature(files, blocksize, blockdim, fealen):
+    im = Image.open(files)
+    #print("processing files %s"%files)
+    imdata=np.asarray(im.convert('L'))
+    tempfeature=feature(imdata, blocksize, blockdim, fealen)
+    return np.rollaxis(tempfeature, 0, 3)
+
+def quantization(size, val=1):
+    return np.empty(size*size, dtype=int).reshape(size,size).fill(val)
+
+def rescale(img):
+    return (img/255)
+
+#calculate 2D DCT of a matrix
+def dct2(img):
+    return dct(dct(img.T, norm = 'ortho').T, norm = 'ortho')
+
+def subfeature(imgraw, fealen):
+
+    if fealen > len(imgraw)*len(imgraw[:,0]):
+        print ('ERROR: Feature vector length exceeds block size.')
+        print ('Abort.')
+        quit()
+
+    img =dct2(imgraw)
+    size=fealen
+    idx =0
+    scaled=img
+    feature=np.zeros(fealen, dtype=np.int)
+    for i in range(0, size):
+        if idx>=size:
+            break
+        elif i==0:
+            feature[0]=scaled[0,0]
+            idx=idx+1
+        elif i%2==1:
+            for j in range(0, i+1):
+                if idx<size:
+                    feature[idx]=scaled[j, i-j]
+                    idx=idx+1
+                else:
+                    break
+        elif i%2==0:
+            for j in range(0, i+1):
+                if idx<size:
+                    feature[idx]=scaled[i-j, j]
+                    idx=idx+1
+                else:
+                    break
+
+    return feature
+
+
+def cutblock(img, block_size, block_dim):
+    blockarray=[]
+    for i in range(0, block_dim):
+        blockarray.append([])
+        for j in range(0, block_dim):
+            blockarray[i].append(img[i*block_size:(i+1)*block_size, j*block_size:(j+1)*block_size])
+
+    return np.asarray(blockarray)
+
+
+def feature(img, block_size, block_dim, fealen):
+    img=rescale(img)
+    feaarray = np.empty(fealen*block_dim*block_dim).reshape(fealen, block_dim, block_dim)
+    blocked = cutblock(img, block_size, block_dim)
+    for i in range(0, block_dim):
+        for j in range(0, block_dim):
+            featemp=subfeature(blocked[i,j], fealen)
+            feaarray[:,i,j]=featemp
+    return feaarray
+
+
+
+
+
 
 '''
     readcsv: Read feature tensors from csv data packet
@@ -141,6 +227,8 @@ def get_batch(data_list, label_list, batch_size):
             batch_data = np.concatenate((batch_data, tmp), axis = 0)
 
     batch_data = batch_data/255
+
+
 
     batch_data_nhs = batch_data[half_bs:]
     batch_data_label_nhs = batch_label[half_bs:]
