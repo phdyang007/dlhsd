@@ -4,8 +4,7 @@ import numpy as np
 from itertools import islice
 import random
 import csv
-import tensorflow as tf
-import tensorflow.contrib.slim as slim
+
 from scipy.misc import imread
 from time import time
 import json
@@ -15,10 +14,6 @@ from PIL import Image
 from scipy.fftpack import dct
 
 
-#
-#
-#
-#
 
 def get_feature(files, blocksize, blockdim, fealen):
     im = Image.open(files)
@@ -136,14 +131,46 @@ def readcsv(target, fealen=32):
             if i==0:
                 file = '/dc.csv'
                 path = target + file
-                featemp = pd.read_csv(path, header=None).as_matrix()
+                featemp = pd.read_csv(path, header=None).values
                 feature.append(featemp)
             else:
                 file = '/ac'+str(i)+'.csv'
                 path = target + file
-                featemp = pd.read_csv(path, header=None).as_matrix()
-                feature.append(featemp)          
+                featemp = pd.read_csv(path, header=None).values
+                feature.append(featemp)  
+            print(np.asarray(featemp).shape)        
     return np.rollaxis(np.asarray(feature), 0, 3)[:,:,0:fealen], label
+
+
+
+def writecsv(target, data, label, fealen):
+    #flatten data
+    data=data.reshape(len(data), fealen, len(data[0,0,0,:])*len(data[0,0,:,0]))
+    for i in range(0, fealen):
+        if i == 0:
+            path = target + '/dc.csv'
+            np.savetxt(path, 
+                data[:,i,:],
+                fmt='%d',
+                delimiter=',',          # column delimiter
+                newline='\n',           # new line character
+                comments='#',          # character to use for comments
+                )
+        else:
+            path = target + '/ac' +str(i) + '.csv'
+            np.savetxt(path,
+                data[:,i,:],
+                fmt='%d',
+                delimiter=',',
+                newline='\n',
+                comments='#')
+    path = target+'/label.csv'
+    np.savetxt(path,
+        label,
+        fmt='%d',
+        delimiter=',',
+        newline='\n',
+        comments='#')
 '''
     processlabel: adjust ground truth for biased learning
     args:
@@ -251,345 +278,372 @@ def get_dct_kernel(block_size, fealen):
     print("dct_kernel_size is ", kernel.shape)
     return np.expand_dims(kernel, axis = 2)
 
-def forward_dct(input, dct_kernel, is_training=True, reuse=tf.AUTO_REUSE, scope='model'):
 
-    with tf.variable_scope(scope, reuse=reuse):
-        with slim.arg_scope([slim.conv2d], activation_fn=tf.nn.relu, stride=1, padding='SAME',
-                            weights_initializer=tf.contrib.layers.xavier_initializer(uniform=False),
-                            biases_initializer=tf.constant_initializer(0.0)):
-
-            net = tf.nn.conv2d(input, dct_kernel, strides = [1, dct_kernel.shape[0], dct_kernel.shape[1], 1], padding = 'VALID')
-            net = slim.conv2d(net, 16, [3, 3], scope='conv1_1')
-            net = slim.conv2d(net, 16, [3, 3], scope='conv1_2')
-            net = slim.max_pool2d(net, [2, 2], stride=2, padding='SAME', scope='pool1')
-            net = slim.conv2d(net, 32, [3, 3], scope='conv2_1')
-            net = slim.conv2d(net, 32, [3, 3], scope='conv2_2')
-            net = slim.max_pool2d(net, [2, 2], stride=2, padding='SAME', scope='pool2')
-            net = slim.flatten(net)
-            w_init = tf.contrib.layers.xavier_initializer(uniform=False)
-            net = slim.fully_connected(net, 250, activation_fn=tf.nn.relu, scope='fc1')
-            net = slim.dropout(net, 0.5, is_training=is_training, scope='dropout')
-            predict = slim.fully_connected(net, 2, activation_fn=None, scope='fc2')
-    return predict
+try:
+    import tensorflow as tf
+    import tensorflow.contrib.slim as slim
 
 
 
-def forward_spie(input, is_training=True, reuse=tf.AUTO_REUSE, scope='model'):
+    def forward_dct(input, dct_kernel, is_training=True, reuse=tf.AUTO_REUSE, scope='model'):
 
-    with tf.variable_scope(scope, reuse=reuse):
-        with slim.arg_scope([slim.conv2d], activation_fn=tf.nn.relu, stride=1, padding='SAME',
-                            weights_initializer=tf.contrib.layers.xavier_initializer(uniform=False),
-                            biases_initializer=tf.constant_initializer(0.0)):
-            net = slim.conv2d(input, 4, kernel_size=[3,3], stride=2, padding='SAME', scope='conv0_1')
-            net = slim.conv2d(net, 4, kernel_size=[3,3], stride=2, padding='SAME', scope='conv0_2')
-            #net = slim.max_pool2d(net, [2, 2], stride=2, scope='pool0_1')
-            for cs in range(3):
+        with tf.variable_scope(scope, reuse=reuse):
+            with slim.arg_scope([slim.conv2d], activation_fn=tf.nn.relu, stride=1, padding='SAME',
+                                weights_initializer=tf.contrib.layers.xavier_initializer(uniform=False),
+                                biases_initializer=tf.constant_initializer(0.0)):
+
+                net = tf.nn.conv2d(input, dct_kernel, strides = [1, dct_kernel.shape[0], dct_kernel.shape[1], 1], padding = 'VALID')
+                net = slim.conv2d(net, 16, [3, 3], scope='conv1_1')
+                net = slim.conv2d(net, 16, [3, 3], scope='conv1_2')
+                net = slim.max_pool2d(net, [2, 2], stride=2, padding='SAME', scope='pool1')
+                net = slim.conv2d(net, 32, [3, 3], scope='conv2_1')
+                net = slim.conv2d(net, 32, [3, 3], scope='conv2_2')
+                net = slim.max_pool2d(net, [2, 2], stride=2, padding='SAME', scope='pool2')
+                net = slim.flatten(net)
+                w_init = tf.contrib.layers.xavier_initializer(uniform=False)
+                net = slim.fully_connected(net, 250, activation_fn=tf.nn.relu, scope='fc1')
+                net = slim.dropout(net, 0.5, is_training=is_training, scope='dropout')
+                predict = slim.fully_connected(net, 2, activation_fn=None, scope='fc2')
+        return predict
+
+
+
+    def forward_spie(input, is_training=True, reuse=tf.AUTO_REUSE, scope='model'):
+
+        with tf.variable_scope(scope, reuse=reuse):
+            with slim.arg_scope([slim.conv2d], activation_fn=tf.nn.relu, stride=1, padding='SAME',
+                                weights_initializer=tf.contrib.layers.xavier_initializer(uniform=False),
+                                biases_initializer=tf.constant_initializer(0.0)):
+                net = slim.conv2d(input, 4, kernel_size=[3,3], stride=2, padding='SAME', scope='conv0_1')
+                net = slim.conv2d(net, 4, kernel_size=[3,3], stride=2, padding='SAME', scope='conv0_2')
+                #net = slim.max_pool2d(net, [2, 2], stride=2, scope='pool0_1')
+                for cs in range(3):
+                    for ci in range(3):
+                        net = slim.conv2d(net, 8*(2**cs), [3, 3], scope='conv'+str(cs+1)+'_'+str(ci+1))
+                        #net = slim.batch_norm(net, center=True, scale=True, activation_fn=tf.nn.relu, is_training=is_training, updates_collections=None, reuse=reuse, scope='bn'+str(cs+1)+'_'+str(ci+1))
+                    net = slim.max_pool2d(net, [2, 2], stride=2, scope='pool'+str(cs+1))
                 for ci in range(3):
-                    net = slim.conv2d(net, 8*(2**cs), [3, 3], scope='conv'+str(cs+1)+'_'+str(ci+1))
-                    #net = slim.batch_norm(net, center=True, scale=True, activation_fn=tf.nn.relu, is_training=is_training, updates_collections=None, reuse=reuse, scope='bn'+str(cs+1)+'_'+str(ci+1))
-                net = slim.max_pool2d(net, [2, 2], stride=2, scope='pool'+str(cs+1))
-            for ci in range(3):
-                net = slim.conv2d(net, 32, [3, 3], scope='conv5_'+str(ci+1))
-            net   = slim.max_pool2d(net, [2, 2], stride=2, scope='pool6')
-            # TODO: complete the baseline model structure
+                    net = slim.conv2d(net, 32, [3, 3], scope='conv5_'+str(ci+1))
+                net   = slim.max_pool2d(net, [2, 2], stride=2, scope='pool6')
+                # TODO: complete the baseline model structure
 
 
-            # Flatten the feature map of pool6 into a feature vector
-            net = slim.flatten(net)
-            # Please check them carefully when you modify
-            w_init = tf.contrib.layers.xavier_initializer(uniform=False)
-            net = slim.fully_connected(net, 1024, scope='fc7', activation_fn=tf.nn.relu)
-            #fc7 = slim.batch_norm(fc7, center=True, scale=True, activation_fn=tf.nn.relu, is_training=is_training, updates_collections=None, reuse=reuse, scope='bnfc7')
-            net = slim.dropout(net, keep_prob=0.5, is_training=is_training, scope='drop7')
-            net = slim.fully_connected(net, 256, scope='fc8', activation_fn=tf.nn.relu)
-            #fc8 = slim.batch_norm(fc8, center=True, scale=True, activation_fn=tf.nn.relu, is_training=is_training, updates_collections=None, reuse=reuse, scope='bnfc8')
-            net = slim.dropout(net, keep_prob=0.5, is_training=is_training, scope='drop8')
-            predict = slim.fully_connected(net, 2, activation_fn=None, scope='predict')
-    return predict
+                # Flatten the feature map of pool6 into a feature vector
+                net = slim.flatten(net)
+                # Please check them carefully when you modify
+                w_init = tf.contrib.layers.xavier_initializer(uniform=False)
+                net = slim.fully_connected(net, 1024, scope='fc7', activation_fn=tf.nn.relu)
+                #fc7 = slim.batch_norm(fc7, center=True, scale=True, activation_fn=tf.nn.relu, is_training=is_training, updates_collections=None, reuse=reuse, scope='bnfc7')
+                net = slim.dropout(net, keep_prob=0.5, is_training=is_training, scope='drop7')
+                net = slim.fully_connected(net, 256, scope='fc8', activation_fn=tf.nn.relu)
+                #fc8 = slim.batch_norm(fc8, center=True, scale=True, activation_fn=tf.nn.relu, is_training=is_training, updates_collections=None, reuse=reuse, scope='bnfc8')
+                net = slim.dropout(net, keep_prob=0.5, is_training=is_training, scope='drop8')
+                predict = slim.fully_connected(net, 2, activation_fn=None, scope='predict')
+        return predict
 
 
 
-def forward(input, is_training=True, reuse=tf.AUTO_REUSE, scope='model'):
+    def forward(input, is_training=True, reuse=tf.AUTO_REUSE, scope='model', aug = False):
+        if aug == True:
+            input = tf.map_fn(lambda img: tf.image.random_flip_left_right(img), input)
+            input = tf.map_fn(lambda img: tf.image.random_flip_up_down(img), input)
+        with tf.variable_scope(scope, reuse=reuse):
+            with slim.arg_scope([slim.conv2d], activation_fn=tf.nn.relu, stride=1, padding='SAME',
+                                weights_initializer=tf.contrib.layers.xavier_initializer(uniform=False),
+                                biases_initializer=tf.constant_initializer(0.0)):
 
-    with tf.variable_scope(scope, reuse=reuse):
-        with slim.arg_scope([slim.conv2d], activation_fn=tf.nn.relu, stride=1, padding='SAME',
-                            weights_initializer=tf.contrib.layers.xavier_initializer(uniform=False),
-                            biases_initializer=tf.constant_initializer(0.0)):
+                #net = tf.nn.conv2d(input, dct_kernel, strides = [1, dct_kernel.shape[0], dct_kernel.shape[1], 1], padding = 'SAME')
+                net = slim.conv2d(input, 16, [3, 3], scope='conv1_1')
+                net = slim.conv2d(net, 16, [3, 3], scope='conv1_2')
+                #net = slim.conv2d(net, 16, [3, 3], scope='conv1_3')
+                net = slim.max_pool2d(net, [2, 2], stride=2, padding='SAME', scope='pool1')
+                net = slim.conv2d(net, 32, [3, 3], scope='conv2_1')
+                net = slim.conv2d(net, 32, [3, 3], scope='conv2_2')
+                #net = slim.conv2d(net, 32, [3, 3], scope='conv2_3')
+                net = slim.max_pool2d(net, [2, 2], stride=2, padding='SAME', scope='pool2')
+                net = slim.flatten(net)
+                w_init = tf.contrib.layers.xavier_initializer(uniform=False)
+                #net = slim.fully_connected(net, 1024, activation_fn=tf.nn.relu, scope='fc1')
+                #net = slim.dropout(net, 0.5, is_training=is_training, scope='dropout')
+                net = slim.fully_connected(net, 256, activation_fn=tf.nn.relu, scope='fc1')
+                net = slim.dropout(net, 0.5, is_training=is_training, scope='dropout')
+                predict = slim.fully_connected(net, 2, activation_fn=None, scope='fc2')
+        return predict
 
-            #net = tf.nn.conv2d(input, dct_kernel, strides = [1, dct_kernel.shape[0], dct_kernel.shape[1], 1], padding = 'SAME')
-            net = slim.conv2d(input, 16, [3, 3], scope='conv1_1')
-            net = slim.conv2d(net, 16, [3, 3], scope='conv1_2')
-            net = slim.max_pool2d(net, [2, 2], stride=2, padding='SAME', scope='pool1')
-            net = slim.conv2d(net, 32, [3, 3], scope='conv2_1')
-            net = slim.conv2d(net, 32, [3, 3], scope='conv2_2')
-            net = slim.max_pool2d(net, [2, 2], stride=2, padding='SAME', scope='pool2')
-            net = slim.flatten(net)
-            w_init = tf.contrib.layers.xavier_initializer(uniform=False)
-            net = slim.fully_connected(net, 250, activation_fn=tf.nn.relu, scope='fc1')
-            net = slim.dropout(net, 0.5, is_training=is_training, scope='dropout')
-            predict = slim.fully_connected(net, 2, activation_fn=None, scope='fc2')
-    return predict
+    '''
+        data: a class to handle the training and testing data, implement minibatch fetch
+        args: 
+            fea: feature tensor of whole data set
+            lab: labels of whole data set
+            ptr: a pointer for the current location of minibatch
+            maxlen: length of entire dataset
+            preload: in current version, to reduce the indexing overhead of SGD, we load all the data into memeory at initialization.
+        methods:
+            nextinstance():  returns a single instance and its label from the training set, used for SGD
+            nextbatch(): returns a batch of instances and their labels from the training set, used for MGD
+                args: 
+                    batch: minibatch number
+                    channel: the channel length of feature tersor, lenth > channel will be discarded
+                    delta1, delta2: see process_label
+            sgd_batch(): returns a batch of instances and their labels from the trainin set randomly, number of hs and nhs are equal.
+                args:
+                    batch: minibatch number
+                    channel: the channel length of feature tersor, lenth > channel will be discarded
+                    delta1, delta2: see process_label
 
-'''
-    data: a class to handle the training and testing data, implement minibatch fetch
-    args: 
-        fea: feature tensor of whole data set
-        lab: labels of whole data set
-        ptr: a pointer for the current location of minibatch
-        maxlen: length of entire dataset
-        preload: in current version, to reduce the indexing overhead of SGD, we load all the data into memeory at initialization.
-    methods:
-        nextinstance():  returns a single instance and its label from the training set, used for SGD
-        nextbatch(): returns a batch of instances and their labels from the training set, used for MGD
-            args: 
-                batch: minibatch number
-                channel: the channel length of feature tersor, lenth > channel will be discarded
-                delta1, delta2: see process_label
-        sgd_batch(): returns a batch of instances and their labels from the trainin set randomly, number of hs and nhs are equal.
-            args:
-                batch: minibatch number
-                channel: the channel length of feature tersor, lenth > channel will be discarded
-                delta1, delta2: see process_label
+    '''
+    class data:
+        def __init__(self, fea, lab, preload=False):
+            self.ptr_n=0
+            self.ptr_h=0
+            self.ptr=0
+            self.dat=fea
+            self.label=lab
+            self.preload=preload
+            with open(lab) as f:
+                self.maxlen=sum(1 for _ in f)
+            if preload:
+                print("loading data into the main memory...")
+                self.ft_buffer, self.label_buffer=readcsv(self.dat)
+        def stat(self):
+            if not self.preload:
+                print("preload data required, abort!")
+            else:
+                total=self.maxlen
+                hs=sum(self.label_buffer)
+                nhs=total - hs
+                return hs, nhs
+        def reset(self):
+            self.ptr=0
+            self.ptr_h=0
+            self.ptr_n=0
+            self.maxlen=len(self.label_buffer)
+        def nextinstance(self):
+            temp_fea=[]
+            label=None
+            idx=random.randint(0,self.maxlen)
+            for dirname, dirnames, filenames in os.walk(self.dat):
+                for i in range(0, len(filenames)-1):
+                        if i==0:
+                            file='/dc.csv'
+                            path=self.dat+file
+                            with open(path) as f:
+                                r=csv.reader(f)
+                                fea=[[int(s) for s in row] for j,row in enumerate(r) if j==idx]
+                                temp_fea.append(np.asarray(fea))
+                        else:
+                            file='/ac'+str(i)+'.csv'
+                            path=self.dat+file
+                            with open(path) as f:
+                                r=csv.reader(f)
+                                fea=[[int(s) for s in row] for j,row in enumerate(r) if j==idx]
+                                temp_fea.append(np.asarray(fea))        
+            with open(self.label) as l:
+                temp_label=np.asarray(list(l)[idx]).astype(int)
+                if temp_label==0:
+                    label=[1,0]
+                else:
+                    label=[0,1]
+            return np.rollaxis(np.array(temp_fea),0,3),np.array([label])
 
-'''
-class data:
-    def __init__(self, fea, lab, preload=False):
-        self.ptr_n=0
-        self.ptr_h=0
-        self.ptr=0
-        self.dat=fea
-        self.label=lab
-        with open(lab) as f:
-            self.maxlen=sum(1 for _ in f)
-        if preload:
-            print("loading data into the main memory...")
-            self.ft_buffer, self.label_buffer=readcsv(self.dat)
-
-    def nextinstance(self):
-        temp_fea=[]
-        label=None
-        idx=random.randint(0,self.maxlen)
-        for dirname, dirnames, filenames in os.walk(self.dat):
-            for i in range(0, len(filenames)-1):
-                    if i==0:
-                        file='/dc.csv'
-                        path=self.dat+file
-                        with open(path) as f:
-                            r=csv.reader(f)
-                            fea=[[int(s) for s in row] for j,row in enumerate(r) if j==idx]
-                            temp_fea.append(np.asarray(fea))
-                    else:
-                        file='/ac'+str(i)+'.csv'
-                        path=self.dat+file
-                        with open(path) as f:
-                            r=csv.reader(f)
-                            fea=[[int(s) for s in row] for j,row in enumerate(r) if j==idx]
-                            temp_fea.append(np.asarray(fea))        
-        with open(self.label) as l:
-            temp_label=np.asarray(list(l)[idx]).astype(int)
+        def sgd(self, channel=None, delta1=0, delta2=0):
+            with open(self.label) as l:
+                labelist=np.asarray(list(l)).astype(int)
+            length=labelist.size
+            idx=random.randint(0, length-1)
+            temp_label=labelist[idx]
             if temp_label==0:
                 label=[1,0]
             else:
                 label=[0,1]
-        return np.rollaxis(np.array(temp_fea),0,3),np.array([label])
+            ft= self.ft_buffer[idx]
 
-    def sgd(self, channel=None, delta1=0, delta2=0):
-        with open(self.label) as l:
-            labelist=np.asarray(list(l)).astype(int)
-        length=labelist.size
-        idx=random.randint(0, length-1)
-        temp_label=labelist[idx]
-        if temp_label==0:
-            label=[1,0]
-        else:
-            label=[0,1]
-        ft= self.ft_buffer[idx]
-
-        return ft, np.array(label)
-    def sgd_batch_2(self, batch, channel=None, delta1=0, delta2=0):
-        with open(self.label) as l:
-            labelist=np.asarray(list(l)).astype(int)
-            labexn = np.where(labelist==0)[0]
-            labexh = np.where(labelist==1)[0]
-        n_length = labexn.size
-        h_length = labexh.size
-        if not batch % 2 == 0:
-            print('ERROR:Batch size must be even')
-            print('Abort.')
-            quit()
-        else:
-            num = batch // 2
-        idxn = labexn[(np.random.rand(num)*n_length).astype(int)]
-        idxh = labexh[(np.random.rand(num)*h_length).astype(int)]
-        label = np.concatenate((np.zeros(num), np.ones(num)))
-        label = processlabel(label,2, 0,0 )
-        ft_batch = np.concatenate((self.ft_buffer[idxn], self.ft_buffer[idxh]))
-        ft_batch_nhs = self.ft_buffer[idxn]
-        label_nhs = np.zeros(num)
-        return ft_batch, label
-
-
-    def sgd_batch(self, batch, channel=None, delta1=0, delta2=0):
-        with open(self.label) as l:
-            labelist=np.asarray(list(l)).astype(int)
-            labexn = np.where(labelist==0)[0]
-            labexh = np.where(labelist==1)[0]
-        n_length = labexn.size
-        h_length = labexh.size
-        if not batch % 2 == 0:
-            print('ERROR:Batch size must be even')
-            print('Abort.')
-            quit()
-        else:
-            num = batch // 2
-        idxn = labexn[(np.random.rand(num)*n_length).astype(int)]
-        idxh = labexh[(np.random.rand(num)*h_length).astype(int)]
-        label = np.concatenate((np.zeros(num), np.ones(num)))
-        #label = processlabel(label,2, delta1, delta2)
-        ft_batch = np.concatenate((self.ft_buffer[idxn], self.ft_buffer[idxh]))
-        ft_batch_nhs = self.ft_buffer[idxn]
-        label_nhs = np.zeros(num)
-        return ft_batch, label, ft_batch_nhs, label_nhs
-    '''
-    nextbatch_beta: returns the balalced batch, used for training only
-    '''
-    def nextbatch_beta(self, batch, channel=None, delta1=0, delta2=0):
-        def update_ptr(ptr, batch, length):
-            if ptr+batch<length:
-                ptr+=batch
-            if ptr+batch>=length:
-                ptr=ptr+batch-length
-            return ptr
-        with open(self.label) as l:
-            labelist=np.asarray(list(l)).astype(int)
-            labexn = np.where(labelist==0)[0]
-            labexh = np.where(labelist==1)[0]
-        n_length = labexn.size
-        h_length = labexh.size
-
-        if not batch % 2 == 0:
-            print('ERROR:Batch size must be even')
-            print('Abort.')
-            quit()
-        else:
-            num = batch//2
-            if num>=n_length or num>=h_length:
-                print('ERROR:Batch size exceeds data size')
+            return ft, np.array(label)
+        def sgd_batch_2(self, batch, channel=None, delta1=0, delta2=0):
+            with open(self.label) as l:
+                labelist=np.asarray(list(l)).astype(int)
+                labexn = np.where(labelist==0)[0]
+                labexh = np.where(labelist==1)[0]
+            n_length = labexn.size
+            h_length = labexh.size
+            if not batch % 2 == 0:
+                print('ERROR:Batch size must be even')
                 print('Abort.')
                 quit()
             else:
-                if self.ptr_n+num <n_length:
-                    idxn = labexn[self.ptr_n:self.ptr_n+num]
-                elif self.ptr_n+num >=n_length:
-                    idxn = np.concatenate((labexn[self.ptr_n:n_length], labexn[0:self.ptr_n+num-n_length]))
-                self.ptr_n = update_ptr(self.ptr_n, num, n_length)
-                if self.ptr_h+num <h_length:
-                    idxh = labexh[self.ptr_h:self.ptr_h+num]
-                elif self.ptr_h+num >=h_length:
-                    idxh = np.concatenate((labexh[self.ptr_h:h_length], labexh[0:self.ptr_h+num-h_length]))
-                self.ptr_h = update_ptr(self.ptr_h, num, h_length)
-                #print self.ptr_n, self.ptr_h
-                label = np.concatenate((np.zeros(num), np.ones(num)))
-                #label = processlabel(label,2, delta1, delta2)
-                ft_batch = np.concatenate((self.ft_buffer[idxn], self.ft_buffer[idxh]))
-                ft_batch_nhs = self.ft_buffer[idxn]
-                label_nhs = np.zeros(num)
-        return ft_batch, label, ft_batch_nhs, label_nhs
-    '''
-    nextbatch_without_balance: returns the normal batch. Suggest to use for training and validation
-    '''
-    def nextbatch_without_balance_alpha(self, batch, channel=None, delta1=0, delta2=0):
-        def update_ptr(ptr, batch, length):
-            if ptr+batch<length:
-                ptr+=batch
-            if ptr+batch>=length:
-                ptr=ptr+batch-length
-            return ptr
-        if self.ptr + batch < self.maxlen:
-            label = self.label_buffer[self.ptr:self.ptr+batch]
-            ft_batch = self.ft_buffer[self.ptr:self.ptr+batch]
-        else:
-            label = np.concatenate((self.label_buffer[self.ptr:self.maxlen], self.label_buffer[0:self.ptr+batch-self.maxlen]))
-            ft_batch = np.concatenate((self.ft_buffer[self.ptr:self.maxlen], self.ft_buffer[0:self.ptr+batch-self.maxlen]))
-        self.ptr = update_ptr(self.ptr, batch, self.maxlen)
-        return ft_batch, label
-    def nextbatch(self, batch, channel=None, delta1=0, delta2=0):
-        #print('recommed to use nextbatch_beta() instead')
-        databat=None
-        temp_fea=[]
-        label=None
-        if batch>self.maxlen:
-            print('ERROR:Batch size exceeds data size')
-            print('Abort.')
-            quit()
-        if self.ptr+batch < self.maxlen:
-            #processing labels
-            with open(self.label) as l:
-                temp_label=np.asarray(list(l)[self.ptr:self.ptr+batch])
-                label=processlabel(temp_label, 2, delta1, delta2)
-            for dirname, dirnames, filenames in os.walk(self.dat):
-                for i in range(0, len(filenames)-1):
-                    if i==0:
-                        file='/dc.csv'
-                        path=self.dat+file
-                        with open(path) as f:
-                            temp_fea.append(np.genfromtxt(islice(f, self.ptr, self.ptr+batch),delimiter=','))
-                    else:
-                        file='/ac'+str(i)+'.csv'
-                        path=self.dat+file
-                        with open(path) as f:
-                            temp_fea.append(np.genfromtxt(islice(f, self.ptr, self.ptr+batch),delimiter=','))
-            self.ptr=self.ptr+batch
-        elif (self.ptr+batch) >= self.maxlen:
-            
-            #processing labels
-            with open(self.label) as l:
-                a=np.genfromtxt(islice(l, self.ptr, self.maxlen),delimiter=',')
-            with open(self.label) as l:
-                b=np.genfromtxt(islice(l, 0, self.ptr+batch-self.maxlen),delimiter=',')
-            #processing data
-            if self.ptr==self.maxlen-1 or self.ptr==self.maxlen:
-                temp_label=b
-            elif self.ptr+batch-self.maxlen==1 or self.ptr+batch-self.maxlen==0:
-                temp_label=a
+                num = batch // 2
+            idxn = labexn[(np.random.rand(num)*n_length).astype(int)]
+            idxh = labexh[(np.random.rand(num)*h_length).astype(int)]
+            label = np.concatenate((np.zeros(num), np.ones(num)))
+            label = processlabel(label,2, 0,0 )
+            ft_batch = np.concatenate((self.ft_buffer[idxn], self.ft_buffer[idxh]))
+            ft_batch_nhs = self.ft_buffer[idxn]
+            label_nhs = np.zeros(num)
+            return ft_batch, label
+
+
+        def sgd_batch(self, batch, channel=None, delta1=0, delta2=0):
+
+            labexn = np.where(self.label_buffer==0)[0]
+            labexh = np.where(self.label_buffer==1)[0]
+            n_length = labexn.size
+            h_length = labexh.size
+            if not batch % 2 == 0:
+                print('ERROR:Batch size must be even')
+                print('Abort.')
+                quit()
             else:
-                temp_label=np.concatenate((a,b))
-            label=processlabel(temp_label,2, delta1, delta2)
-            #print label.shape
-            for dirname, dirnames, filenames in os.walk(self.dat):
-                for i in range(0, len(filenames)-1):
-                    if i==0:
-                        file='/dc.csv'
-                        path=self.dat+file
-                        with open(path) as f:
-                            a=np.genfromtxt(islice(f, self.ptr, self.maxlen),delimiter=',')
-                        with open(path) as f:
-                            b=np.genfromtxt(islice(f, None, self.ptr+batch-self.maxlen),delimiter=',')
-                        if self.ptr==self.maxlen-1 or self.ptr==self.maxlen:
-                            temp_fea.append(b)
-                        elif self.ptr+batch-self.maxlen==1 or self.ptr+batch-self.maxlen==0:
-                            temp_fea.append(a)
+                num = batch // 2
+            idxn = labexn[(np.random.rand(num)*n_length).astype(int)]
+            idxh = labexh[(np.random.rand(num)*h_length).astype(int)]
+            label = np.concatenate((np.zeros(num), np.ones(num)))
+            #label = processlabel(label,2, delta1, delta2)
+            ft_batch = np.concatenate((self.ft_buffer[idxn], self.ft_buffer[idxh]))
+            ft_batch_nhs = self.ft_buffer[idxn]
+            label_nhs = np.zeros(num)
+            return ft_batch, label, ft_batch_nhs, label_nhs
+        '''
+        nextbatch_beta: returns the balalced batch, used for training only
+        '''
+        def nextbatch_beta(self, batch, channel=None, delta1=0, delta2=0):
+            def update_ptr(ptr, batch, length):
+                if ptr+batch<length:
+                    ptr+=batch
+                if ptr+batch>=length:
+                    ptr=ptr+batch-length
+                return ptr
+
+            labexn = np.where(self.label_buffer==0)[0]
+            labexh = np.where(self.label_buffer==1)[0]
+            n_length = labexn.size
+            h_length = labexh.size
+
+            if not batch % 2 == 0:
+                print('ERROR:Batch size must be even')
+                print('Abort.')
+                quit()
+            else:
+                num = batch//2
+                if num>=n_length or num>=h_length:
+                    print('ERROR:Batch size exceeds data size')
+                    print('Abort.')
+                    quit()
+                else:
+                    if self.ptr_n+num <n_length:
+                        idxn = labexn[self.ptr_n:self.ptr_n+num]
+                    elif self.ptr_n+num >=n_length:
+                        idxn = np.concatenate((labexn[self.ptr_n:n_length], labexn[0:self.ptr_n+num-n_length]))
+                    self.ptr_n = update_ptr(self.ptr_n, num, n_length)
+                    if self.ptr_h+num <h_length:
+                        idxh = labexh[self.ptr_h:self.ptr_h+num]
+                    elif self.ptr_h+num >=h_length:
+                        idxh = np.concatenate((labexh[self.ptr_h:h_length], labexh[0:self.ptr_h+num-h_length]))
+                    self.ptr_h = update_ptr(self.ptr_h, num, h_length)
+                    #print self.ptr_n, self.ptr_h
+                    label = np.concatenate((np.zeros(num), np.ones(num)))
+                    #label = processlabel(label,2, delta1, delta2)
+                    ft_batch = np.concatenate((self.ft_buffer[idxn], self.ft_buffer[idxh]))
+                    ft_batch_nhs = self.ft_buffer[idxn]
+                    label_nhs = np.zeros(num)
+            return ft_batch, label, ft_batch_nhs, label_nhs
+        '''
+        nextbatch_without_balance: returns the normal batch. Suggest to use for training and validation
+        '''
+        def nextbatch_without_balance_alpha(self, batch, channel=None, delta1=0, delta2=0):
+            def update_ptr(ptr, batch, length):
+                if ptr+batch<length:
+                    ptr+=batch
+                if ptr+batch>=length:
+                    ptr=ptr+batch-length
+                return ptr
+            if self.ptr + batch < self.maxlen:
+                label = self.label_buffer[self.ptr:self.ptr+batch]
+                ft_batch = self.ft_buffer[self.ptr:self.ptr+batch]
+            else:
+                label = np.concatenate((self.label_buffer[self.ptr:self.maxlen], self.label_buffer[0:self.ptr+batch-self.maxlen]))
+                ft_batch = np.concatenate((self.ft_buffer[self.ptr:self.maxlen], self.ft_buffer[0:self.ptr+batch-self.maxlen]))
+            self.ptr = update_ptr(self.ptr, batch, self.maxlen)
+            return ft_batch, label
+        def nextbatch(self, batch, channel=None, delta1=0, delta2=0):
+            #print('recommed to use nextbatch_beta() instead')
+            databat=None
+            temp_fea=[]
+            label=None
+            if batch>self.maxlen:
+                print('ERROR:Batch size exceeds data size')
+                print('Abort.')
+                quit()
+            if self.ptr+batch < self.maxlen:
+                #processing labels
+                with open(self.label) as l:
+                    temp_label=np.asarray(list(l)[self.ptr:self.ptr+batch])
+                    label=processlabel(temp_label, 2, delta1, delta2)
+                for dirname, dirnames, filenames in os.walk(self.dat):
+                    for i in range(0, len(filenames)-1):
+                        if i==0:
+                            file='/dc.csv'
+                            path=self.dat+file
+                            with open(path) as f:
+                                temp_fea.append(np.genfromtxt(islice(f, self.ptr, self.ptr+batch),delimiter=','))
                         else:
-                            try:
-                                temp_fea.append(np.concatenate((a,b)))
-                            except:
-                                print (a.shape, b.shape, self.ptr)
-                    else:
-                        file='/ac'+str(i)+'.csv'
-                        path=self.dat+file
-                        with open(path) as f:
-                            a=np.genfromtxt(islice(f, self.ptr, self.maxlen),delimiter=',')
-                        with open(path) as f:
-                            b=np.genfromtxt(islice(f, 0, self.ptr+batch-self.maxlen),delimiter=',')
-                        if self.ptr==self.maxlen-1 or self.ptr==self.maxlen:
-                            temp_fea.append(b)
-                        elif self.ptr+batch-self.maxlen==1 or self.ptr+batch-self.maxlen==0:
-                            temp_fea.append(a)
+                            file='/ac'+str(i)+'.csv'
+                            path=self.dat+file
+                            with open(path) as f:
+                                temp_fea.append(np.genfromtxt(islice(f, self.ptr, self.ptr+batch),delimiter=','))
+                self.ptr=self.ptr+batch
+            elif (self.ptr+batch) >= self.maxlen:
+                
+                #processing labels
+                with open(self.label) as l:
+                    a=np.genfromtxt(islice(l, self.ptr, self.maxlen),delimiter=',')
+                with open(self.label) as l:
+                    b=np.genfromtxt(islice(l, 0, self.ptr+batch-self.maxlen),delimiter=',')
+                #processing data
+                if self.ptr==self.maxlen-1 or self.ptr==self.maxlen:
+                    temp_label=b
+                elif self.ptr+batch-self.maxlen==1 or self.ptr+batch-self.maxlen==0:
+                    temp_label=a
+                else:
+                    temp_label=np.concatenate((a,b))
+                label=processlabel(temp_label,2, delta1, delta2)
+                #print label.shape
+                for dirname, dirnames, filenames in os.walk(self.dat):
+                    for i in range(0, len(filenames)-1):
+                        if i==0:
+                            file='/dc.csv'
+                            path=self.dat+file
+                            with open(path) as f:
+                                a=np.genfromtxt(islice(f, self.ptr, self.maxlen),delimiter=',')
+                            with open(path) as f:
+                                b=np.genfromtxt(islice(f, None, self.ptr+batch-self.maxlen),delimiter=',')
+                            if self.ptr==self.maxlen-1 or self.ptr==self.maxlen:
+                                temp_fea.append(b)
+                            elif self.ptr+batch-self.maxlen==1 or self.ptr+batch-self.maxlen==0:
+                                temp_fea.append(a)
+                            else:
+                                try:
+                                    temp_fea.append(np.concatenate((a,b)))
+                                except:
+                                    print (a.shape, b.shape, self.ptr)
                         else:
-                            try:
-                                temp_fea.append(np.concatenate((a,b)))
-                            except:
-                                print (a.shape, b.shape, self.ptr)
-            self.ptr=self.ptr+batch-self.maxlen
-        #print np.asarray(temp_fea).shape
-        return np.rollaxis(np.asarray(temp_fea), 0, 3)[:,:,0:channel], label
+                            file='/ac'+str(i)+'.csv'
+                            path=self.dat+file
+                            with open(path) as f:
+                                a=np.genfromtxt(islice(f, self.ptr, self.maxlen),delimiter=',')
+                            with open(path) as f:
+                                b=np.genfromtxt(islice(f, 0, self.ptr+batch-self.maxlen),delimiter=',')
+                            if self.ptr==self.maxlen-1 or self.ptr==self.maxlen:
+                                temp_fea.append(b)
+                            elif self.ptr+batch-self.maxlen==1 or self.ptr+batch-self.maxlen==0:
+                                temp_fea.append(a)
+                            else:
+                                try:
+                                    temp_fea.append(np.concatenate((a,b)))
+                                except:
+                                    print (a.shape, b.shape, self.ptr)
+                self.ptr=self.ptr+batch-self.maxlen
+            #print np.asarray(temp_fea).shape
+            return np.rollaxis(np.asarray(temp_fea), 0, 3)[:,:,0:channel], label
+
+except:
+    print("tensorflow not available, training functions are disabled!")

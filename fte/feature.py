@@ -7,7 +7,7 @@ import time
 from progress.bar import Bar
 import multiprocessing as mtp 
 
-
+global dirname
 inFolder=sys.argv[1]
 outFolder=sys.argv[2]
 blocksize=int(sys.argv[3])  #100
@@ -27,12 +27,12 @@ def get_feature(files):
     im = Image.open(os.path.join(dirname,files))
     print("processing files %s"%files)
     imdata=np.asarray(im.convert('L'))
-    tempfeature=f.feature(imdata, blocksize, blockdim, quant, fealen)
+    tempfeature=f.feature(imdata, blocksize, blockdim, fealen)
     return tempfeature
 
 for dirname, dirnames, filenames in os.walk(inFolder):
     pass
-global dirname
+
 cpu_count=mtp.cpu_count()
 p=mtp.Pool(cpu_count)
 tmp_data=[]

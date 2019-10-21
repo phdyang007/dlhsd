@@ -5,6 +5,7 @@ import time
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = str(sys.argv[2])
 from progress.bar import Bar
+import pandas as pd
 
 '''
 Initialize Path and Global Params
@@ -13,25 +14,43 @@ infile = cp.SafeConfigParser()
 infile.read(sys.argv[1])
 
 test_path   = infile.get('dir','test_path')
-test_list = open(test_path).readlines()
-max_len = len(test_list)
+
+
 model_path = infile.get('dir','model_path')
 fealen     = int(infile.get('feature','ft_length'))
 blockdim   = int(infile.get('feature','block_dim'))
 imgdim   = int(infile.get('feature','img_dim'))
-
-
+aug  = int(infile.get('train','aug'))
+aug  = 0
 '''
 Prepare the Input
 '''
 
 
-dct_kernel = get_dct_kernel(imgdim//blockdim, fealen)
-x_data = tf.placeholder(tf.float32, shape=[None, imgdim, imgdim, 1])              #input FT
+test_data = data(test_path, test_path+'/label.csv', preload=True)
+maxlen = test_data.maxlen
+x_data = tf.placeholder(tf.float32, shape=[None, blockdim*blockdim, fealen])              #input FT
 y_gt   = tf.placeholder(tf.float32, shape=[None, 2])                                      #ground truth label
+x      = tf.reshape(x_data, [-1, blockdim, blockdim, fealen])                               #ground truth label
                                      #ground truth label without bias
                             #reshap to NHWC
-predict= forward_spie(x_data, is_training=False)    
+#predict= forward(x, is_training=False)    
+
+
+
+x      = tf.reshape(x_data, [-1, blockdim, blockdim, fealen])                             #reshap to NHWC
+x_ud   = tf.map_fn(lambda img: tf.image.flip_up_down(img), x)                   #up down flipped
+x_lr   = tf.map_fn(lambda img: tf.image.flip_left_right(img), x)                #left right flipped
+x_lu   = tf.map_fn(lambda img: tf.image.flip_up_down(img), x_lr)                #both flipped
+predict_or = forward(x, is_training=False)                                      #do forward
+predict_ud = forward(x_ud, is_training=False, reuse=True)  
+predict_lr = forward(x_lr, is_training=False, reuse=True)
+predict_lu = forward(x_lu, is_training=False, reuse=True)
+if aug==1:
+    predict = (predict_or + predict_lr + predict_lu + predict_ud)/4.0
+else:
+    predict = predict_or
+
 y_gt   = tf.placeholder(tf.float32, shape=[None, 2])                                      #ground truth label
 
 y      = tf.cast(tf.argmax(predict, 1), tf.int32)                                         
@@ -44,6 +63,11 @@ config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 config.gpu_options.per_process_gpu_memory_fraction = 0.4
 
+bs = 512
+
+#df = pd.DataFrame()
+#cvs = df.read_csv(os.path.join(model_path,"cv.csv"), usecols=['step','acc'])
+#step = int(cvs[np.argmax(cvs.acc.values])
 
 ckpt = tf.train.get_checkpoint_state(model_path)
 if ckpt and ckpt.model_checkpoint_path:
@@ -60,21 +84,21 @@ with tf.Session(config=config) as sess:
     ahs = 0   #actual hs
     anhs= 0   #actual hs
     start   = time.time()
-    bar = Bar('Detecting', max=max_len)
-    for titr in range(0, max_len):
-        #if not titr == test_data.maxlen//1000:
-
-
-        t = get_one(test_list, titr)
-        tdata = t[0]
-        tlabel= t[1]
-        tmp_y    = y.eval(feed_dict={x_data: tdata})
-        #tmp_label= np.argmax(tlabel, axis=1)
-        tmp      = tlabel+tmp_y
-        chs += (tmp==2)
-        cnhs+= (int(tmp)==0)
-        ahs += tlabel
-        anhs+= tlabel==0
+    bar = Bar('Detecting', max=test_data.maxlen//bs+1)
+    for titr in range(0, test_data.maxlen//bs+1):
+        if not titr == test_data.maxlen//bs:
+            tbatch = test_data.nextbatch_without_balance_alpha(bs)
+        else:
+            tbatch = test_data.nextbatch_without_balance_alpha(test_data.maxlen-titr*bs)
+        tdata = tbatch[0]
+        tlabel= processlabel(tbatch[1])
+        tmp_y    = y.eval(feed_dict={x_data: tdata, y_gt: tlabel})
+        tmp_label= np.argmax(tlabel, axis=1)
+        tmp      = tmp_label+tmp_y
+        chs += sum(tmp==2)
+        cnhs+= sum(tmp==0)
+        ahs += sum(tmp_label)
+        anhs+= sum(tmp_label==0)
         bar.next()
     bar.finish()
     print (chs, ahs, cnhs, anhs)
