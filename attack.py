@@ -139,20 +139,32 @@ Initialize Path and Global Params
 infile = cp.SafeConfigParser()
 infile.read(sys.argv[1])
 
-test_path   = infile.get('dir','train_path')
+test_path   = infile.get('dir','train_path_txt')
 test_list = open(test_path).readlines()
 model_path = infile.get('dir','model_path')
 fealen     = int(infile.get('feature','ft_length'))
 blockdim   = int(infile.get('feature','block_dim'))
+blocksize   = int(infile.get('feature','block_size'))
 imgdim   = int(infile.get('feature','img_dim'))
-lr = float(infile.get('feature', 'learning_rate'))
+lr = float(infile.get('feature', 'attack_learning_rate'))
 
+'''
+Preprocess data: generate DCT from image
+'''
+def _preprocess(input_image, X, alpha):
+    img = generate_input_image(input_image, X, alpha)
+    fe = feature(img, blocksize, blockdim, fealen)
+    return np.expand_dims(np.rollaxis(fe, 0, 3), axis=0)
+
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+    
 '''
 Prepare the Input
 '''
 
 max_iter = 10000
-max_candidates = 20
+max_candidates = 50
 target_idx = 20 # hotspot target index in test list
 
 #X = generate_candidates(test_list, target_idx)
@@ -162,20 +174,21 @@ X = X[:max_candidates]
 img, _ = get_image_from_input_id(test_list, target_idx)
 #alpha = 1.0/X.shape[0] * np.ones((X.shape[0],1))
 alpha = np.zeros((X.shape[0],1))
-la = 1.0
+la = 0.0
 #alpha_lr = 1
 #la_lr = 1
 
 t_alpha = tf.cast(tf.get_variable(name='t_alpha', initializer=alpha), tf.float32)
-t_X = tf.cast(tf.get_variable(name='X', initializer=X, trainable=False), tf.float32)
-t_img = tf.cast(tf.get_variable(name='img', initializer=img, trainable=False), tf.float32)
+t_X = tf.cast(tf.convert_to_tensor(X), tf.float32)
+t_img = tf.cast(tf.convert_to_tensor(img), tf.float32)
 t_la = tf.cast(tf.Variable(la, name='t_la'), tf.float32)
 
+t_feaarray = tf.cast(tf.convert_to_tensor(_preprocess(img, X, sigmoid(alpha))), dtype=tf.float32)
 
-x_data = tf.expand_dims(tf.expand_dims(t_generate_input_image(t_img, t_X, tf.sigmoid(t_alpha)), axis=0), axis=-1)
-loss_1 = tf.norm(tf.reduce_sum(t_X * tf.reshape(tf.sigmoid(t_alpha), [tf.shape(tf.sigmoid(t_alpha))[0],1,1])), 2)
-fwd = tf.nn.softmax_cross_entropy_with_logits(labels=tf.constant([1,0]), logits=forward_spie(x_data, is_training=False))
+loss_1 = tf.norm(tf.reduce_sum(t_X * tf.reshape(tf.sigmoid(t_alpha), [tf.shape(tf.sigmoid(t_alpha))[0],1,1]), axis=0), 2)
 
+predict = forward(t_feaarray)
+fwd = tf.placeholder(tf.float32)
 loss = loss_1 + tf.sigmoid(t_la) * fwd
 
 t_vars = tf.trainable_variables()
@@ -204,12 +217,16 @@ with tf.Session(config=config) as sess:
     sess.run(tf.global_variables_initializer())
     saver    = tf.train.Saver(m_vars)
     saver.restore(sess, os.path.join(model_path, ckpt_name))
-    
-    print("fwd original:")
-    print(fwd.eval())
-    
+    '''
+    a = np.zeros(alpha.shape)
+    _t_feaarray = tf.cast(tf.convert_to_tensor(_preprocess(img, X, a)), dtype=tf.float32)
+    _predict = forward(_t_feaarray).eval()
+    print("predict original:")
+    print(_predict)
+    '''
     for iter in range(max_iter):
-        opt.run()
+        prediction = predict.eval()
+        opt.run(feed_dict={fwd: prediction[0][1] - prediction[0][0]})
         
         if debug and iter % 100 == 0:
             print("****************")
@@ -218,11 +235,25 @@ with tf.Session(config=config) as sess:
             print("lambda:")
             print(t_la.eval())
             print("loss:")
-            print(loss.eval())
+            print(loss.eval(feed_dict={fwd: prediction[0][1] - prediction[0][0]}))
             
-            print("fwd new:")
-            print(fwd.eval())
-
+            print("predict new:")
+            print(prediction)
+            print("fwd:")
+            print(prediction[0][1] - prediction[0][0])
+            '''
+            a = t_alpha.eval()
+            idx1 = np.where(a > 0)
+            idx2 = np.where(a <= 0)
+            a[idx1[0]] = 1.0
+            a[idx2[0]] = 0.0
+            _t_feaarray = tf.cast(tf.convert_to_tensor(_preprocess(img, X, a)), dtype=tf.float32)
+            _predict = forward(_t_feaarray).eval()
+            print("adversarial predict:")
+            print(_predict)
+            print("fwd:")
+            print(_predict[0][1] - _predict[0][0])
+            '''
 exit()
 '''
 second attack method using cross update. not finish yet
@@ -255,4 +286,6 @@ with tf.GradientTape() as tape:
         # TODO: stop criteria
         if False:
             break
+
+
 
