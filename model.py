@@ -77,7 +77,7 @@ def cutblock(img, block_size, block_dim):
 
     return np.asarray(blockarray)
 
-
+# Generate DCT from image
 def feature(img, block_size, block_dim, fealen):
     img=rescale(img)
     feaarray = np.empty(fealen*block_dim*block_dim).reshape(fealen, block_dim, block_dim)
@@ -342,7 +342,7 @@ try:
         return predict
 
 
-
+    #dct input
     def forward(input, is_training=True, reuse=tf.AUTO_REUSE, scope='model', aug = False):
         if aug == True:
             input = tf.map_fn(lambda img: tf.image.random_flip_left_right(img), input)
