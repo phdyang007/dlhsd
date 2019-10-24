@@ -50,7 +50,7 @@ def _generate_sraf_sub(srafs, save_img=False, save_dir="generate_sraf_sub/"):
     black_img_ = cv2.imread("black.png", 0)
     for item in srafs:
         black_img = np.copy(black_img_)
-        black_img[item[0]:item[0]+item[2], item[1]:item[1]+item[3]] = -1
+        black_img[item[0]:item[0]+item[2], item[1]:item[1]+item[3]] = -255
         sub.append(black_img)
     if save_img:
         count = 1
@@ -86,32 +86,26 @@ def _generate_sraf_add(img, vias, srafs, insert_shape=[40,90], save_img=False, s
             shape[np.random.randint(0,high=2)] = 40
             if i+shape[0] <= black_img.shape[0] and j+shape[1] <= black_img.shape[1] and np.all(black_img[i:i+shape[0],j:j+shape[1]] == 255):
                 img = np.copy(black_img_)
-                img[i:i+shape[0],j:j+shape[1]] = 1
+                img[i:i+shape[0],j:j+shape[1]] = 255
                 add.append(img)
                 black_img[max(0, i-min_dis_to_sraf):min(black_img.shape[0], i+shape[0]+min_dis_to_sraf), max(0, j-min_dis_to_sraf):min(black_img.shape[1], j+shape[1]+min_dis_to_sraf)] = 0
     if save_img:
         count = 1
         for item in add:
-            img = np.copy(item)
-            img *= 255
-            cv2.imwrite(save_dir+str(count)+".png", img)
+            cv2.imwrite(save_dir+str(count)+".png", item)
             count += 1
     return np.array(add, dtype=np.float32)
-    
-def generate_input_image(input_image, X, alpha):
-    return np.sum(X*alpha.reshape(alpha.shape[0],1,1), axis=0) + input_image
-
-def t_generate_input_image(t_img, t_X, t_alpha):
-    return tf.reduce_sum(t_X * tf.reshape(t_alpha, [tf.shape(t_alpha)[0],1,1]), axis=0) + t_img
 
 def generate_candidates(test_file_list, id):
     '''
     gengerate all candidates and save them
     '''
+    print("Generating candidates...")
     img, _ = get_image_from_input_id(test_file_list, id)
     vias, srafs = _find_vias(_find_shapes(img))
-    add = _generate_sraf_add(img, vias, srafs, save_img=True)
-    sub = _generate_sraf_sub(srafs, save_img=True)
+    add = _generate_sraf_add(img, vias, srafs, save_img=False)
+    sub = _generate_sraf_sub(srafs, save_img=False)
+    print("Generating candidates done. Total candidates: "+str(len(add)+len(sub)))
     return np.concatenate((add, sub))
     
 def load_candidates(sub_dir="generate_sraf_sub/", add_dir="generate_sraf_add/"):
@@ -119,20 +113,21 @@ def load_candidates(sub_dir="generate_sraf_sub/", add_dir="generate_sraf_add/"):
     load candidates. call this function if candidates have been saved
     by calling gengerate_candidates() in previous run.
     '''
+    print("Loading candidates...")
     X = []
     for root, dirs, files in os.walk(add_dir):
         for name in files:
             if ".png" in name:
-                img = np.array(cv2.imread(os.path.join(root,name),0),dtype=np.float32) / 255
+                img = np.array(cv2.imread(os.path.join(root,name),0),dtype=np.float32)
                 X.append(img)
     for root, dirs, files in os.walk(sub_dir):
         for name in files:
             if ".png" in name:
-                img = np.array(cv2.imread(os.path.join(root,name),0),dtype=np.float32) / -255
+                img = np.array(cv2.imread(os.path.join(root,name),0),dtype=np.float32)
                 X.append(img)
+    print("Loading candidates done. Total candidates: "+str(len(X)))
     return np.array(X)
     
-
 '''
 Initialize Path and Global Params
 '''
@@ -147,145 +142,147 @@ blockdim   = int(infile.get('feature','block_dim'))
 blocksize   = int(infile.get('feature','block_size'))
 imgdim   = int(infile.get('feature','img_dim'))
 lr = float(infile.get('feature', 'attack_learning_rate'))
-
-'''
-Preprocess data: generate DCT from image
-'''
-def _preprocess(input_image, X, alpha):
-    img = generate_input_image(input_image, X, alpha)
-    fe = feature(img, blocksize, blockdim, fealen)
-    return np.expand_dims(np.rollaxis(fe, 0, 3), axis=0)
-
-def sigmoid(x):
-    return 1 / (1 + np.exp(-x))
     
 '''
 Prepare the Input
 '''
+test_list_hs = [int(item.split()[1]) for item in test_list]
+test_list_hs = np.array(test_list_hs)
+idx = np.where(test_list_hs == 1)
 
-max_iter = 10000
+max_iter = 2000
 max_candidates = 50
-target_idx = 20 # hotspot target index in test list
 
-#X = generate_candidates(test_list, target_idx)
-X = load_candidates()
-np.random.shuffle(X)
-X = X[:max_candidates]
-img, _ = get_image_from_input_id(test_list, target_idx)
-#alpha = 1.0/X.shape[0] * np.ones((X.shape[0],1))
-alpha = np.zeros((X.shape[0],1))
-la = 0.0
-#alpha_lr = 1
-#la_lr = 1
-
-t_alpha = tf.cast(tf.get_variable(name='t_alpha', initializer=alpha), tf.float32)
-t_X = tf.cast(tf.convert_to_tensor(X), tf.float32)
-t_img = tf.cast(tf.convert_to_tensor(img), tf.float32)
-t_la = tf.cast(tf.Variable(la, name='t_la'), tf.float32)
-
-t_feaarray = tf.cast(tf.convert_to_tensor(_preprocess(img, X, sigmoid(alpha))), dtype=tf.float32)
-
-loss_1 = tf.norm(tf.reduce_sum(t_X * tf.reshape(tf.sigmoid(t_alpha), [tf.shape(tf.sigmoid(t_alpha))[0],1,1]), axis=0), 2)
-
-predict = forward(t_feaarray)
-fwd = tf.placeholder(tf.float32)
-loss = loss_1 + tf.sigmoid(t_la) * fwd
-
-t_vars = tf.trainable_variables()
-d_vars = [var for var in t_vars if 't_' in var.name]
-m_vars = [var for var in t_vars if 'model' in var.name]
-
-opt = tf.train.RMSPropOptimizer(lr).minimize(loss, var_list=d_vars)
+alpha = -10.0 + np.zeros((max_candidates,1))
+la = 100000.0
 
 '''
-Start attacking
+Start attack
 '''
-config = tf.ConfigProto()
-config.gpu_options.allow_growth = True
-config.gpu_options.per_process_gpu_memory_fraction = 0.4
+def attack(target_idx):
+    print("start attacking on id: "+str(target_idx))
+    tf.reset_default_graph()
+    
+    alpha = -10.0 + np.zeros((max_candidates,1))
+    la = 100000.0
 
+    t_alpha = tf.sigmoid(tf.cast(tf.get_variable(name='t_alpha', initializer=alpha), tf.float32))
+    t_la = tf.cast(tf.Variable(la, name='t_la'), tf.float32)
+    
+    # generate candidates
+    X = generate_candidates(test_list, target_idx)
+    np.random.shuffle(X)
+    X = X[:max_candidates]
+    t_X = tf.cast(tf.convert_to_tensor(X), tf.float32)
+    img, _ = get_image_from_input_id(test_list, target_idx)
+    # dct
+    input_images = []
+    fe = feature(img, blocksize, blockdim, fealen)
+    input_images.append(np.rollaxis(fe, 0, 3))
+    for item in X:
+        fe = feature(item, blocksize, blockdim, fealen)
+        input_images.append(np.rollaxis(fe, 0, 3))
+    input_images = np.asarray(input_images)
+    
+    input_placeholder = tf.placeholder(dtype=tf.float32, shape=[max_candidates + 1, blockdim, blockdim, fealen])
+    perturbation = tf.zeros(dtype=tf.float32, shape=[1, blockdim, blockdim, fealen])
+    for i in range(max_candidates):
+        perturbation += t_alpha[i] * input_placeholder[i+1]
+    input_merged = input_placeholder[0]+perturbation
 
-ckpt = tf.train.get_checkpoint_state(model_path)
-if ckpt and ckpt.model_checkpoint_path:
-    ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
-    print(ckpt_name)
+    loss_1 = tf.norm(tf.reduce_sum(t_X * tf.reshape(t_alpha, [tf.shape(t_alpha)[0],1,1]), axis=0), 2)
 
-'''
-first attack method by minimizing L(alpha, lambda)
-'''
-with tf.Session(config=config) as sess:
-    sess.run(tf.global_variables_initializer())
-    saver    = tf.train.Saver(m_vars)
-    saver.restore(sess, os.path.join(model_path, ckpt_name))
+    predict = forward(input_merged)
+    nhs_pre, hs_pre = tf.split(predict, [1, 1], 1)
+    fwd = tf.subtract(hs_pre, nhs_pre)
+
+    loss = loss_1 + t_la * fwd
+
+    t_vars = tf.trainable_variables()
+    d_vars = [var for var in t_vars if 't_' in var.name]
+    m_vars = [var for var in t_vars if 'model' in var.name]
+    
+    opt = tf.train.RMSPropOptimizer(lr).minimize(loss, var_list=d_vars)
+    
     '''
-    a = np.zeros(alpha.shape)
-    _t_feaarray = tf.cast(tf.convert_to_tensor(_preprocess(img, X, a)), dtype=tf.float32)
-    _predict = forward(_t_feaarray).eval()
-    print("predict original:")
-    print(_predict)
+    Config and model
     '''
-    for iter in range(max_iter):
-        prediction = predict.eval()
-        opt.run(feed_dict={fwd: prediction[0][1] - prediction[0][0]})
-        
-        if debug and iter % 100 == 0:
-            print("****************")
-            print("alpha:")
-            print(t_alpha.eval())
-            print("lambda:")
-            print(t_la.eval())
-            print("loss:")
-            print(loss.eval(feed_dict={fwd: prediction[0][1] - prediction[0][0]}))
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+    config.gpu_options.per_process_gpu_memory_fraction = 0.4
+
+
+    ckpt = tf.train.get_checkpoint_state(model_path)
+    if ckpt and ckpt.model_checkpoint_path:
+        ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
+
+    
+    '''
+    first attack method by minimizing L(alpha, lambda)
+    '''
+    with tf.Session(config=config) as sess:
+        sess.run(tf.global_variables_initializer())
+        saver    = tf.train.Saver(m_vars)
+        saver.restore(sess, os.path.join(model_path, ckpt_name))
+           
+        for iter in range(max_iter):
+            opt.run(feed_dict={input_placeholder: input_images})
             
-            print("predict new:")
-            print(prediction)
-            print("fwd:")
-            print(prediction[0][1] - prediction[0][0])
-            '''
-            a = t_alpha.eval()
-            idx1 = np.where(a > 0)
-            idx2 = np.where(a <= 0)
-            a[idx1[0]] = 1.0
-            a[idx2[0]] = 0.0
-            _t_feaarray = tf.cast(tf.convert_to_tensor(_preprocess(img, X, a)), dtype=tf.float32)
-            _predict = forward(_t_feaarray).eval()
-            print("adversarial predict:")
-            print(_predict)
-            print("fwd:")
-            print(_predict[0][1] - _predict[0][0])
-            '''
-exit()
-'''
-second attack method using cross update. not finish yet
-'''
-with tf.GradientTape() as tape:
-    for iter in range(max_iter):
-        input_image = generate_input_image(img, X, alpha)
-        input_image = np.expand_dims(np.expand_dims(input_image, axis = 0), axis = -1)
-        tape.watch(input_image)
-        prediction = y.eval(feed_dict={x_data: input_image})
-        s = np.sum(X*alpha, axis=0)
+            if iter % 100 == 0:
+                a = t_alpha.eval()
+                diff = fwd.eval(feed_dict={input_placeholder: input_images})
+                if debug:
+                    print("****************")
+                    print("alpha:")
+                    print(a)
+                    
+                    print("lambda:")
+                    print(t_la.eval())
+                    
+                    print("fwd:")
+                    print(diff)
+                    
+                    print("loss:")
+                    print(loss.eval(feed_dict={input_placeholder: input_images}))
+                
+                if diff < -1.0:
+                    idx = np.argmax(a)
+                    a = np.zeros(a.shape)
+                    a[idx] = 1.0
+                    t_alpha = tf.convert_to_tensor(a)
+                    diff = fwd.eval(feed_dict={input_placeholder: input_images})
+                    if debug:
+                        print("SRAF FOUND")
+                        print("fwd:")
+                        print(diff)
+                    if diff < 0.0:
+                        print("ATTACK SUCCEED")
+                        print("****************")
+                        return 1
+                    elif diff >= 0.0:
+                        print("ATTACK FAIL: sraf not enough")
+                        print("****************")
+                        return 0
         
-        # update alpha
-        for idx in range (X.shape[0]):
-            # Get the gradients of the loss w.r.t to the individual X.
-            gradient = tape.gradient(prediction, X[idx])
-            loss_to_alpha_grad = np.sum((s + la*gradient) * X[idx]) # TODO: how to transform matrix to number
-            alpha[idx] -= loss_to_alpha_grad * alpha_lr
-        
-        # update lambda
-        loss_to_la_grad = prediction
-        la -= loss_to_la_grad * la_lr
-        
-        if debug:
-            print("alpha:")
-            print(alpha)
+        a = t_alpha.eval()
+        idx = np.argmax(a)
+        a = np.zeros(a.shape)
+        a[idx] = 1.0
+        t_alpha = tf.convert_to_tensor(a)
+        diff = fwd.eval(feed_dict={input_placeholder: input_images})
+        print("max iteration reached")
+        if diff < 0.0:
+            print("ATTACK SUCCEED")
             print("****************")
-            print("lambda: " + str(la))
-            
-        # TODO: stop criteria
-        if False:
-            break
+            return 1
+        elif diff >= 0.0:
+            print("ATTACK FAIL: sraf not enough")
+            print("****************")
+            return 0
 
-
-
+total = 0
+success = 0
+for id in idx[0]:
+    total += 1
+    success += attack(id)
+    print("success attack: [ "+str(success)+" / "+str(total)+" ]")
