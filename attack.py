@@ -7,7 +7,7 @@ import sys
 import time
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = str(sys.argv[2])
-debug = True
+debug = False
 
 def get_image_from_input_id(test_file_list, id):
     '''
@@ -134,7 +134,7 @@ Initialize Path and Global Params
 infile = cp.SafeConfigParser()
 infile.read(sys.argv[1])
 
-test_path   = infile.get('dir','train_path_txt')
+test_path   = infile.get('dir','test_path_txt')
 test_list = open(test_path).readlines()
 model_path = infile.get('dir','model_path')
 fealen     = int(infile.get('feature','ft_length'))
@@ -150,11 +150,10 @@ test_list_hs = [int(item.split()[1]) for item in test_list]
 test_list_hs = np.array(test_list_hs)
 idx = np.where(test_list_hs == 1)
 
-max_iter = 2000
-max_candidates = 50
-
-alpha = -10.0 + np.zeros((max_candidates,1))
-la = 100000.0
+max_iter = 1000
+max_candidates = 32
+max_perturbation = 3
+alpha_threshold = 0.1
 
 '''
 Start attack
@@ -163,17 +162,19 @@ def attack(target_idx):
     print("start attacking on id: "+str(target_idx))
     tf.reset_default_graph()
     
-    alpha = -10.0 + np.zeros((max_candidates,1))
-    la = 100000.0
-
-    t_alpha = tf.sigmoid(tf.cast(tf.get_variable(name='t_alpha', initializer=alpha), tf.float32))
-    t_la = tf.cast(tf.Variable(la, name='t_la'), tf.float32)
-    
     # generate candidates
     X = generate_candidates(test_list, target_idx)
     np.random.shuffle(X)
     X = X[:max_candidates]
     t_X = tf.cast(tf.convert_to_tensor(X), tf.float32)
+    #max_candidates = X.shape[0]
+    #t_X = tf.placeholder(dtype=tf.float32, shape=[max_candidates, imgdim, imgdim])
+    
+    alpha = -10.0 + np.zeros((max_candidates,1))
+    la = 100000.0
+    t_alpha = tf.sigmoid(tf.cast(tf.get_variable(name='t_alpha', initializer=alpha), tf.float32))
+    t_la = tf.cast(tf.Variable(la, name='t_la'), tf.float32)
+
     img, _ = get_image_from_input_id(test_list, target_idx)
     # dct
     input_images = []
@@ -226,11 +227,11 @@ def attack(target_idx):
         saver.restore(sess, os.path.join(model_path, ckpt_name))
            
         for iter in range(max_iter):
-            opt.run(feed_dict={input_placeholder: input_images})
+            opt.run(feed_dict={input_placeholder: input_images, t_X: X})
             
-            if iter % 100 == 0:
+            if iter % 10 == 0:
                 a = t_alpha.eval()
-                diff = fwd.eval(feed_dict={input_placeholder: input_images})
+                diff = fwd.eval(feed_dict={input_placeholder: input_images, t_X: X})
                 if debug:
                     print("****************")
                     print("alpha:")
@@ -243,42 +244,46 @@ def attack(target_idx):
                     print(diff)
                     
                     print("loss:")
-                    print(loss.eval(feed_dict={input_placeholder: input_images}))
+                    print(loss.eval(feed_dict={input_placeholder: input_images, t_X: X}))
                 
-                if diff < -1.0:
-                    idx = np.argmax(a)
-                    a = np.zeros(a.shape)
-                    a[idx] = 1.0
-                    t_alpha = tf.convert_to_tensor(a)
-                    diff = fwd.eval(feed_dict={input_placeholder: input_images})
-                    if debug:
-                        print("SRAF FOUND")
-                        print("fwd:")
-                        print(diff)
-                    if diff < 0.0:
-                        print("ATTACK SUCCEED")
-                        print("****************")
-                        return 1
-                    elif diff >= 0.0:
-                        print("ATTACK FAIL: sraf not enough")
-                        print("****************")
-                        return 0
+                if diff < -0.0:
+                    idx = []
+                    b = np.copy(a)
+                    for i in range(max_perturbation):
+                        idx.append(np.argmax(b))
+                        b = np.delete(b, idx[-1])
+                        c = np.zeros(a.shape)
+                        c[idx] = 1.0
+                        t_alpha = tf.convert_to_tensor(c)
+                        diff = fwd.eval(feed_dict={input_placeholder: input_images, t_X: X})
+
+                        if diff <= 0.0:
+                            print("ATTACK SUCCEED: sarfs add: "+str(len(idx)))
+                            print("****************")
+                            return 1
+
+                    t_alpha = tf.convert_to_tensor(a)     
         
-        a = t_alpha.eval()
-        idx = np.argmax(a)
-        a = np.zeros(a.shape)
-        a[idx] = 1.0
-        t_alpha = tf.convert_to_tensor(a)
-        diff = fwd.eval(feed_dict={input_placeholder: input_images})
         print("max iteration reached")
-        if diff < 0.0:
-            print("ATTACK SUCCEED")
-            print("****************")
-            return 1
-        elif diff >= 0.0:
-            print("ATTACK FAIL: sraf not enough")
-            print("****************")
-            return 0
+        a = t_alpha.eval()
+        idx = []
+        b = np.copy(a)
+        for i in range(max_perturbation):
+            idx.append(np.argmax(b))
+            b = np.delete(b, idx[-1])
+            c = np.zeros(a.shape)
+            c[idx] = 1.0
+            t_alpha = tf.convert_to_tensor(c)
+            diff = fwd.eval(feed_dict={input_placeholder: input_images, t_X: X})
+        
+            if diff <= 0.0:
+                print("ATTACK SUCCEED: sarfs add: "+str(len(idx)))
+                print("****************")
+                return 1
+        
+        print("ATTACK FAIL: sraf not enough")
+        print("****************")
+        return 0
 
 total = 0
 success = 0
