@@ -76,7 +76,6 @@ def _generate_sraf_add(img, vias, srafs, insert_shape=[40,90], save_img=False, s
         black_img[max(0, center[0]-min_dis_to_vias):min(black_img.shape[0], center[0]+min_dis_to_vias), max(0, center[1]-min_dis_to_vias):min(black_img.shape[1], center[1]+min_dis_to_vias)] = 0
     for item in srafs:
         black_img[max(0, item[0]-min_dis_to_sraf):min(black_img.shape[0], item[0]+item[2]+min_dis_to_sraf), max(0, item[1]-min_dis_to_sraf):min(black_img.shape[1], item[1]+item[3]+min_dis_to_sraf)] = 0
-    # TODO: implement sampling from valid space
     # iterate the space and add sraf one by one. srafs are generated randomly with width = 40 and length in range insert_shape
     for i in range(1, black_img.shape[0]-1):
         for j in range(1, black_img.shape[1]-1):
@@ -127,7 +126,13 @@ def load_candidates(sub_dir="generate_sraf_sub/", add_dir="generate_sraf_add/"):
                 X.append(img)
     print("Loading candidates done. Total candidates: "+str(len(X)))
     return np.array(X)
-    
+
+def generate_adversarial_image(img, X, alpha):
+    img = img.astype(np.uint8)
+    X = np.absolute(X).astype(np.uint8)
+    alpha = alpha.astype(np.uint8)
+    return (np.sum(X*np.expand_dims(alpha,-1),axis=0)).astype(np.uint8)
+
 '''
 Initialize Path and Global Params
 '''
@@ -148,27 +153,130 @@ Prepare the Input
 '''
 test_list_hs = [int(item.split()[1]) for item in test_list]
 test_list_hs = np.array(test_list_hs)
-idx = np.where(test_list_hs == 1)
+idx = np.where(test_list_hs == 1) #total = 80152, hs = 6107
 
-max_iter = 1000
-max_candidates = 32
+max_iter = 100
+_max_candidates = 32
 max_perturbation = 3
 alpha_threshold = 0.1
 
 '''
 Start attack
 '''
-def attack(target_idx):
+def attack3(target_idx):
     print("start attacking on id: "+str(target_idx))
     tf.reset_default_graph()
-    
+    max_candidates = _max_candidates
     # generate candidates
     X = generate_candidates(test_list, target_idx)
     np.random.shuffle(X)
+    if max_candidates > X.shape[0]:
+        max_candidates = X.shape[0]
     X = X[:max_candidates]
-    t_X = tf.cast(tf.convert_to_tensor(X), tf.float32)
-    #max_candidates = X.shape[0]
-    #t_X = tf.placeholder(dtype=tf.float32, shape=[max_candidates, imgdim, imgdim])
+    #t_X = tf.cast(tf.convert_to_tensor(X), tf.float32)
+    t_X = tf.placeholder(dtype=tf.float32, shape=[max_candidates, imgdim, imgdim])
+    
+    alpha = 0.001 + np.zeros((max_candidates*(max_candidates+1)//2,1))
+    t_alpha = tf.cast(tf.get_variable(name='t_alpha', initializer=alpha), tf.float32)
+
+    img, _ = get_image_from_input_id(test_list, target_idx)
+    # dct
+    print("dct...")
+    input_images = []
+    fe = feature(img, blocksize, blockdim, fealen)
+    input_images.append(np.rollaxis(fe, 0, 3))
+    for i in range(X.shape[0]):
+        for j in range(i, X.shape[0]):
+            idx = np.concatenate((np.where(X[i] == 255), np.where(X[j] == 255)), axis=1)
+            item = np.zeros(img.shape, dtype=np.uint8)
+            item[idx[0], idx[1]] = 255
+            fe = feature(item, blocksize, blockdim, fealen)
+            input_images.append(np.rollaxis(fe, 0, 3))
+    print("dct done")
+    input_images = np.asarray(input_images)
+    
+    input_placeholder = tf.placeholder(dtype=tf.float32, shape=[max_candidates*(max_candidates+1)//2 + 1, blockdim, blockdim, fealen])
+    perturbation = tf.zeros(dtype=tf.float32, shape=[1, blockdim, blockdim, fealen])
+    for i in range(max_candidates):
+        perturbation += t_alpha[i] * input_placeholder[i+1]
+    input_merged = input_placeholder[0]+perturbation
+
+    predict = forward(input_merged)
+    nhs_pre, hs_pre = tf.split(predict, [1, 1], 1)
+    fwd = tf.subtract(hs_pre, nhs_pre)
+
+    loss = fwd
+
+    t_vars = tf.trainable_variables()
+    d_vars = [var for var in t_vars if 't_' in var.name]
+    m_vars = [var for var in t_vars if 'model' in var.name]
+    
+    opt = tf.train.RMSPropOptimizer(lr).minimize(loss, var_list=d_vars)
+    
+    '''
+    Config and model
+    '''
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+    config.gpu_options.per_process_gpu_memory_fraction = 0.9
+
+
+    ckpt = tf.train.get_checkpoint_state(model_path)
+    if ckpt and ckpt.model_checkpoint_path:
+        ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
+
+    
+    '''
+    first attack method by minimizing L(alpha, lambda)
+    '''
+    with tf.Session(config=config) as sess:
+        sess.run(tf.global_variables_initializer())
+        saver    = tf.train.Saver(m_vars)
+        saver.restore(sess, os.path.join(model_path, ckpt_name))
+           
+        opt.run(feed_dict={input_placeholder: input_images, t_X: X})
+            
+        a = t_alpha.eval()
+        diff = fwd.eval(feed_dict={input_placeholder: input_images, t_X: X})
+        if debug:
+            print("****************")
+            print("alpha:")
+            print(a)
+            
+            print("fwd:")
+            print(diff)
+            
+            print("loss:")
+            print(loss.eval(feed_dict={input_placeholder: input_images, t_X: X}))
+        
+        idx = np.argmax(a)
+        c = np.zeros(a.shape)
+        c[idx] = 1.0
+        t_alpha = tf.convert_to_tensor(c)
+        diff = fwd.eval(feed_dict={input_placeholder: input_images, t_X: X})
+        if diff <= 0.0:
+            #aimg = generate_adversarial_image(img, X, c)
+            #cv2.imwrite('dct/attack3/'+str(target_idx)+'.png', aimg)
+            print("ATTACK SUCCEED")
+            print("****************")
+            return 1
+        
+        print("ATTACK FAIL: sraf not enough")
+        print("****************")
+        return 0
+    
+def attack(target_idx):
+    print("start attacking on id: "+str(target_idx))
+    tf.reset_default_graph()
+    max_candidates = _max_candidates
+    # generate candidates
+    X = generate_candidates(test_list, target_idx)
+    np.random.shuffle(X)
+    if max_candidates > X.shape[0]:
+        max_candidates = X.shape[0]
+    X = X[:max_candidates]
+    #t_X = tf.cast(tf.convert_to_tensor(X), tf.float32)
+    t_X = tf.placeholder(dtype=tf.float32, shape=[max_candidates, imgdim, imgdim])
     
     alpha = -10.0 + np.zeros((max_candidates,1))
     la = 100000.0
@@ -210,7 +318,7 @@ def attack(target_idx):
     '''
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
-    config.gpu_options.per_process_gpu_memory_fraction = 0.4
+    config.gpu_options.per_process_gpu_memory_fraction = 0.9
 
 
     ckpt = tf.train.get_checkpoint_state(model_path)
@@ -258,6 +366,8 @@ def attack(target_idx):
                         diff = fwd.eval(feed_dict={input_placeholder: input_images, t_X: X})
 
                         if diff <= 0.0:
+                            aimg = generate_adversarial_image(img, X, c)
+                            cv2.imwrite('dct/attack/'+str(target_idx)+'.png', aimg)
                             print("ATTACK SUCCEED: sarfs add: "+str(len(idx)))
                             print("****************")
                             return 1
@@ -277,6 +387,8 @@ def attack(target_idx):
             diff = fwd.eval(feed_dict={input_placeholder: input_images, t_X: X})
         
             if diff <= 0.0:
+                aimg = generate_adversarial_image(img, X, c)
+                cv2.imwrite('dct/attack/'+str(target_idx)+'.png', aimg)
                 print("ATTACK SUCCEED: sarfs add: "+str(len(idx)))
                 print("****************")
                 return 1
@@ -285,9 +397,12 @@ def attack(target_idx):
         print("****************")
         return 0
 
-total = 0
+
 success = 0
+total = 0
 for id in idx[0]:
+    if id < 0:
+        continue    
     total += 1
-    success += attack(id)
+    success += attack3(id)
     print("success attack: [ "+str(success)+" / "+str(total)+" ]")
