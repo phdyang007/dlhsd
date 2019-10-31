@@ -12,7 +12,7 @@ import pandas as pd
 import math
 from PIL import Image
 from scipy.fftpack import dct
-
+import multiprocessing as mtp
 
 
 def get_feature(files, blocksize, blockdim, fealen):
@@ -88,7 +88,19 @@ def feature(img, block_size, block_dim, fealen):
             feaarray[:,i,j]=featemp
     return feaarray
 
+def feature_via(img):
+    return feature(img, 128, 16, 32)
 
+
+
+def feature_mp(imgs):
+    cpu_count=mtp.cpu_count()
+    p=mtp.Pool(cpu_count)
+    tmp_data=[]
+    tmp_data.append(p.map(feature_via, imgs))
+    tmp_data=np.array(tmp_data[0])
+
+    return np.array(tmp_data)
 
 
 
