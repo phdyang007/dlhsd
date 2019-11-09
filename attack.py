@@ -128,10 +128,11 @@ def load_candidates(sub_dir="generate_sraf_sub/", add_dir="generate_sraf_add/"):
     return np.array(X)
 
 def generate_adversarial_image(img, X, alpha):
-    img = img.astype(np.uint8)
-    X = np.absolute(X).astype(np.uint8)
-    alpha = alpha.astype(np.uint8)
-    return (np.sum(X*np.expand_dims(alpha,-1),axis=0)).astype(np.uint8)
+    img = img.astype(np.int32)
+    #X = np.absolute(X).astype(np.int32)
+    X = X.astype(np.int32)
+    alpha = alpha.astype(np.int32)
+    return (img+np.sum(X*np.expand_dims(alpha,-1),axis=0)).astype(np.uint8)
 
 '''
 Initialize Path and Global Params
@@ -146,7 +147,13 @@ fealen     = int(infile.get('feature','ft_length'))
 blockdim   = int(infile.get('feature','block_dim'))
 blocksize   = int(infile.get('feature','block_size'))
 imgdim   = int(infile.get('feature','img_dim'))
-lr = float(infile.get('feature', 'attack_learning_rate'))
+lr = float(infile.get('attack', 'attack_learning_rate'))
+max_iter = int(infile.get('attack', 'max_iter'))
+_max_candidates = int(infile.get('attack', 'max_candidates'))
+max_perturbation = int(infile.get('attack', 'max_perturbation'))
+alpha_threshold = float(infile.get('attack', 'alpha_threshold'))
+attack_path = infile.get('attack', 'attack_path_txt')
+img_save_dir = 'dct/attack_'+str(_max_candidates)+'_'+str(max_iter)+'/'
     
 '''
 Prepare the Input
@@ -155,135 +162,89 @@ test_list_hs = [int(item.split()[1]) for item in test_list]
 test_list_hs = np.array(test_list_hs)
 idx = np.where(test_list_hs == 1) #total = 80152, hs = 6107
 
-max_iter = 100
-_max_candidates = 32
-max_perturbation = 3
-alpha_threshold = 0.1
+def _merge_image(dir, savedir, txtfile, test=0, merge=0, id_low=0, id_high=21514):
+    with open(txtfile, 'w+') as f:
+        if test == 1:
+            for id in idx[0]:
+                if id < id_low:
+                    continue
+                if id >= id_high:
+                    break
+                f.write('./'+savedir+'/'+str(id)+'.png')
+                f.write('\n')
+                img2, _ = get_image_from_input_id(test_list, id)
+                cv2.imwrite(savedir+'/'+str(id)+'.png', img2)
 
-'''
-Start attack
-'''
-def attack3(target_idx):
-    print("start attacking on id: "+str(target_idx))
-    tf.reset_default_graph()
-    max_candidates = _max_candidates
-    # generate candidates
-    X = generate_candidates(test_list, target_idx)
-    np.random.shuffle(X)
-    if max_candidates > X.shape[0]:
-        max_candidates = X.shape[0]
-    X = X[:max_candidates]
-    #t_X = tf.cast(tf.convert_to_tensor(X), tf.float32)
-    t_X = tf.placeholder(dtype=tf.float32, shape=[max_candidates, imgdim, imgdim])
+        if merge == 1:
+            print("merge mode")
+            for root, dirs, files in os.walk(dir):
+                for name in files:
+                    if ".png" in name:
+                        id = int(name[:-4])
+                        if id < id_low or id >= id_high:
+                            continue
+                        if test != 1:
+                            f.write('./'+savedir+'/'+str(id)+'.png')
+                            f.write('\n')
+                        img1 = cv2.imread(dir+'/'+str(id)+'.png', 0)
+                        cv2.imwrite(savedir+'/'+str(id)+'.png', img1)
+                
+def _test_attack():
+    imgs = []
+    for i in attack_list:
+        imgs.append(cv2.imread(i[:-1], 0))
+    print("total images: "+str(len(imgs)))
+    fearr = feature_mp(np.array(imgs))
+    fearr = np.rollaxis(fearr, 1, 4)
     
-    alpha = 0.001 + np.zeros((max_candidates*(max_candidates+1)//2,1))
-    t_alpha = tf.cast(tf.get_variable(name='t_alpha', initializer=alpha), tf.float32)
-
-    img, _ = get_image_from_input_id(test_list, target_idx)
-    # dct
-    print("dct...")
-    input_images = []
-    fe = feature(img, blocksize, blockdim, fealen)
-    input_images.append(np.rollaxis(fe, 0, 3))
-    for i in range(X.shape[0]):
-        for j in range(i, X.shape[0]):
-            idx = np.concatenate((np.where(X[i] == 255), np.where(X[j] == 255)), axis=1)
-            item = np.zeros(img.shape, dtype=np.uint8)
-            item[idx[0], idx[1]] = 255
-            fe = feature(item, blocksize, blockdim, fealen)
-            input_images.append(np.rollaxis(fe, 0, 3))
-    print("dct done")
-    input_images = np.asarray(input_images)
+    input_placeholder = tf.placeholder(dtype=tf.float32, shape=[None, blockdim, blockdim, fealen])
+    predict = forward(input_placeholder, is_training=False)
+    y      = tf.cast(tf.argmax(predict, 1), tf.int32)
+    accu   = tf.reduce_mean(tf.cast(y, tf.float32))
     
-    input_placeholder = tf.placeholder(dtype=tf.float32, shape=[max_candidates*(max_candidates+1)//2 + 1, blockdim, blockdim, fealen])
-    perturbation = tf.zeros(dtype=tf.float32, shape=[1, blockdim, blockdim, fealen])
-    for i in range(max_candidates):
-        perturbation += t_alpha[i] * input_placeholder[i+1]
-    input_merged = input_placeholder[0]+perturbation
-
-    predict = forward(input_merged)
-    nhs_pre, hs_pre = tf.split(predict, [1, 1], 1)
-    fwd = tf.subtract(hs_pre, nhs_pre)
-
-    loss = fwd
-
     t_vars = tf.trainable_variables()
     d_vars = [var for var in t_vars if 't_' in var.name]
     m_vars = [var for var in t_vars if 'model' in var.name]
     
-    opt = tf.train.RMSPropOptimizer(lr).minimize(loss, var_list=d_vars)
-    
-    '''
-    Config and model
-    '''
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
     config.gpu_options.per_process_gpu_memory_fraction = 0.9
 
-
     ckpt = tf.train.get_checkpoint_state(model_path)
     if ckpt and ckpt.model_checkpoint_path:
         ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
-
-    
-    '''
-    first attack method by minimizing L(alpha, lambda)
-    '''
+        
     with tf.Session(config=config) as sess:
         sess.run(tf.global_variables_initializer())
         saver    = tf.train.Saver(m_vars)
         saver.restore(sess, os.path.join(model_path, ckpt_name))
-           
-        opt.run(feed_dict={input_placeholder: input_images, t_X: X})
-            
-        a = t_alpha.eval()
-        diff = fwd.eval(feed_dict={input_placeholder: input_images, t_X: X})
-        if debug:
-            print("****************")
-            print("alpha:")
-            print(a)
-            
-            print("fwd:")
-            print(diff)
-            
-            print("loss:")
-            print(loss.eval(feed_dict={input_placeholder: input_images, t_X: X}))
-        
-        idx = np.argmax(a)
-        c = np.zeros(a.shape)
-        c[idx] = 1.0
-        t_alpha = tf.convert_to_tensor(c)
-        diff = fwd.eval(feed_dict={input_placeholder: input_images, t_X: X})
-        if diff <= 0.0:
-            #aimg = generate_adversarial_image(img, X, c)
-            #cv2.imwrite('dct/attack3/'+str(target_idx)+'.png', aimg)
-            print("ATTACK SUCCEED")
-            print("****************")
-            return 1
-        
-        print("ATTACK FAIL: sraf not enough")
-        print("****************")
-        return 0
-    
-def attack(target_idx):
-    print("start attacking on id: "+str(target_idx))
-    tf.reset_default_graph()
-    max_candidates = _max_candidates
-    # generate candidates
-    X = generate_candidates(test_list, target_idx)
-    np.random.shuffle(X)
-    if max_candidates > X.shape[0]:
-        max_candidates = X.shape[0]
-    X = X[:max_candidates]
-    #t_X = tf.cast(tf.convert_to_tensor(X), tf.float32)
-    t_X = tf.placeholder(dtype=tf.float32, shape=[max_candidates, imgdim, imgdim])
-    
-    alpha = -10.0 + np.zeros((max_candidates,1))
-    la = 100000.0
-    t_alpha = tf.sigmoid(tf.cast(tf.get_variable(name='t_alpha', initializer=alpha), tf.float32))
-    t_la = tf.cast(tf.Variable(la, name='t_la'), tf.float32)
 
-    img, _ = get_image_from_input_id(test_list, target_idx)
+        print('Hotspot Detection Accuracy is %f'%accu.eval(feed_dict={input_placeholder: fearr}))
+
+def test_attack(dir='dct/attack_128_100', savedir='dct/merged_128_100', txtfile='dct/attack.txt', test=0, merge=0, id_low=0, id_high=21514):
+    merge_image(dir=dir, savedir=savedir, txtfile=txtfile, test=test, merge=merge, id_low=id_low, id_high=id_high)
+    attack_list = open(attack_path).readlines()
+    _test_attack()
+
+def validate_attack():
+    img = cv2.imread("dct/tmp/img.png", 0)
+    aimg = cv2.imread("dct/tmp/aimg.png", 0)
+    cimg1 = cv2.imread("dct/tmp/12.png", 0)
+    cimg2 = cv2.imread("dct/tmp/28.png", 0)
+    cimg3 = cv2.imread("dct/tmp/59.png", 0)
+    
+    v_input_merged = tf.placeholder(dtype=tf.float32, shape=[1, blockdim, blockdim, fealen])
+    
+    v_predict = forward(v_input_merged,is_training=False)
+    v_nhs_pre, v_hs_pre = tf.split(v_predict, [1, 1], 1)
+    v_fwd = tf.subtract(v_hs_pre, v_nhs_pre)
+    
+    # generate candidates
+    X = []
+    X.append(cimg1)
+    X.append(cimg2)
+    X.append(cimg3)
+    X = np.array(X)
     # dct
     input_images = []
     fe = feature(img, blocksize, blockdim, fealen)
@@ -292,26 +253,20 @@ def attack(target_idx):
         fe = feature(item, blocksize, blockdim, fealen)
         input_images.append(np.rollaxis(fe, 0, 3))
     input_images = np.asarray(input_images)
-    
-    input_placeholder = tf.placeholder(dtype=tf.float32, shape=[max_candidates + 1, blockdim, blockdim, fealen])
+        
+    input_placeholder = tf.placeholder(dtype=tf.float32, shape=[4, blockdim, blockdim, fealen])
     perturbation = tf.zeros(dtype=tf.float32, shape=[1, blockdim, blockdim, fealen])
-    for i in range(max_candidates):
-        perturbation += t_alpha[i] * input_placeholder[i+1]
+    for i in range(3):
+        perturbation += input_placeholder[i+1]
     input_merged = input_placeholder[0]+perturbation
 
-    loss_1 = tf.norm(tf.reduce_sum(t_X * tf.reshape(t_alpha, [tf.shape(t_alpha)[0],1,1]), axis=0), 2)
-
-    predict = forward(input_merged)
+    predict = forward(input_merged,is_training=False)
     nhs_pre, hs_pre = tf.split(predict, [1, 1], 1)
     fwd = tf.subtract(hs_pre, nhs_pre)
-
-    loss = loss_1 + t_la * fwd
-
-    t_vars = tf.trainable_variables()
-    d_vars = [var for var in t_vars if 't_' in var.name]
-    m_vars = [var for var in t_vars if 'model' in var.name]
     
-    opt = tf.train.RMSPropOptimizer(lr).minimize(loss, var_list=d_vars)
+    t_vars = tf.trainable_variables()
+    m_vars = [var for var in t_vars if 'model' in var.name]
+    d_vars = [var for var in t_vars if 't_' in var.name]
     
     '''
     Config and model
@@ -324,8 +279,117 @@ def attack(target_idx):
     ckpt = tf.train.get_checkpoint_state(model_path)
     if ckpt and ckpt.model_checkpoint_path:
         ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
+        
+    with tf.Session(config=config) as sess:
+        sess.run(tf.global_variables_initializer())
+        saver    = tf.train.Saver(m_vars)
+        saver.restore(sess, os.path.join(model_path, ckpt_name))
+        
+        v_input_images = []
+        fe = feature(aimg, blocksize, blockdim, fealen)
+        v_input_images.append(np.rollaxis(fe, 0, 3))
+        v_input_images = np.asarray(v_input_images)
+        v_diff = v_fwd.eval(feed_dict={v_input_merged: v_input_images})
+        
+        diff = fwd.eval(feed_dict={input_placeholder: input_images})
+        
+        print("diff: ")
+        print(diff)
+        print("v_diff: ")
+        print(v_diff)
 
+#validate_attack()
+#exit()
+
+#test_attack(id_low=10731, id_high=10733)
+#exit()
+
+'''
+Start attack
+'''
     
+def attack(target_idx):
+    tf.reset_default_graph()
+    # test misclassification
+    img, _ = get_image_from_input_id(test_list, target_idx)
+    v_input_merged = tf.placeholder(dtype=tf.float32, shape=[1, blockdim, blockdim, fealen])
+    
+    v_predict = forward(v_input_merged,is_training=False)
+    v_nhs_pre, v_hs_pre = tf.split(v_predict, [1, 1], 1)
+    v_fwd = tf.subtract(v_hs_pre, v_nhs_pre)
+    
+    t_vars = tf.trainable_variables()
+    m_vars = [var for var in t_vars if 'model' in var.name]
+    
+    '''
+    Config and model
+    '''
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+    config.gpu_options.per_process_gpu_memory_fraction = 0.9
+
+
+    ckpt = tf.train.get_checkpoint_state(model_path)
+    if ckpt and ckpt.model_checkpoint_path:
+        ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
+        
+    with tf.Session(config=config) as sess:
+        sess.run(tf.global_variables_initializer())
+        saver    = tf.train.Saver(m_vars)
+        saver.restore(sess, os.path.join(model_path, ckpt_name))
+        
+        v_input_images = []
+        fe = feature(img, blocksize, blockdim, fealen)
+        v_input_images.append(np.rollaxis(fe, 0, 3))
+        v_input_images = np.asarray(v_input_images)
+        v_diff = v_fwd.eval(feed_dict={v_input_merged: v_input_images})
+        if v_diff < -0.01:
+            print("misclassification")
+            return -1
+    
+    print("start attacking on id: "+str(target_idx))
+    max_candidates = _max_candidates
+    # generate candidates
+    X = generate_candidates(test_list, target_idx)
+    np.random.shuffle(X)
+    if max_candidates > X.shape[0]:
+        max_candidates = X.shape[0]
+    X = X[:max_candidates]
+    t_X = tf.placeholder(dtype=tf.float32, shape=[max_candidates, imgdim, imgdim])
+    
+    alpha = -10.0 + np.zeros((max_candidates,1))
+    la = 100000.0
+    t_alpha = tf.sigmoid(tf.cast(tf.get_variable(name='t_alpha', initializer=alpha), tf.float32))
+    t_la = tf.cast(tf.Variable(la, name='t_la'), tf.float32)
+    
+    # dct
+    input_images = []
+    fe = feature(img, blocksize, blockdim, fealen)
+    input_images.append(np.rollaxis(fe, 0, 3))
+    for item in X:
+        fe = feature(item, blocksize, blockdim, fealen)
+        input_images.append(np.rollaxis(fe, 0, 3))
+    input_images = np.asarray(input_images)
+        
+    input_placeholder = tf.placeholder(dtype=tf.float32, shape=[max_candidates + 1, blockdim, blockdim, fealen])
+    perturbation = tf.zeros(dtype=tf.float32, shape=[1, blockdim, blockdim, fealen])
+    for i in range(max_candidates):
+        perturbation += t_alpha[i] * input_placeholder[i+1]
+    input_merged = input_placeholder[0]+perturbation
+
+    loss_1 = tf.norm(tf.reduce_sum(t_X * tf.reshape(t_alpha, [tf.shape(t_alpha)[0],1,1]), axis=0), 2)
+
+    predict = forward(input_merged,is_training=False)
+    nhs_pre, hs_pre = tf.split(predict, [1, 1], 1)
+    fwd = tf.subtract(hs_pre, nhs_pre)
+
+    loss = loss_1 + t_la * fwd
+
+    t_vars = tf.trainable_variables()
+    m_vars = [var for var in t_vars if 'model' in var.name]
+    d_vars = [var for var in t_vars if 't_' in var.name]
+    opt = tf.train.RMSPropOptimizer(lr).minimize(loss, var_list=d_vars)
+
     '''
     first attack method by minimizing L(alpha, lambda)
     '''
@@ -333,12 +397,15 @@ def attack(target_idx):
         sess.run(tf.global_variables_initializer())
         saver    = tf.train.Saver(m_vars)
         saver.restore(sess, os.path.join(model_path, ckpt_name))
-           
+        
+        interval = 10
+        
         for iter in range(max_iter):
             opt.run(feed_dict={input_placeholder: input_images, t_X: X})
             
-            if iter % 10 == 0:
+            if iter % interval == 0:
                 a = t_alpha.eval()
+                #_t_alpha = t_alpha
                 diff = fwd.eval(feed_dict={input_placeholder: input_images, t_X: X})
                 if debug:
                     print("****************")
@@ -351,10 +418,15 @@ def attack(target_idx):
                     print("fwd:")
                     print(diff)
                     
+                    print("loss_1:")
+                    print(loss_1.eval(feed_dict={input_placeholder:
+input_images, t_X: X}))
+   
                     print("loss:")
                     print(loss.eval(feed_dict={input_placeholder: input_images, t_X: X}))
                 
                 if diff < -0.0:
+                    interval = 1
                     idx = []
                     b = np.copy(a)
                     for i in range(max_perturbation):
@@ -362,17 +434,25 @@ def attack(target_idx):
                         b = np.delete(b, idx[-1])
                         c = np.zeros(a.shape)
                         c[idx] = 1.0
-                        t_alpha = tf.convert_to_tensor(c)
-                        diff = fwd.eval(feed_dict={input_placeholder: input_images, t_X: X})
-
-                        if diff <= 0.0:
+                        #t_alpha = tf.convert_to_tensor(c)
+                        diff = fwd.eval(feed_dict={input_placeholder: input_images, t_X: X, t_alpha: c})
+                        if diff <= -0.01:
                             aimg = generate_adversarial_image(img, X, c)
-                            cv2.imwrite('dct/attack/'+str(target_idx)+'.png', aimg)
+                            v_input_images = []
+                            fe = feature(aimg, blocksize, blockdim, fealen)
+                            v_input_images.append(np.rollaxis(fe, 0, 3))
+                            v_input_images = np.asarray(v_input_images)
+                            v_diff = v_fwd.eval(feed_dict={v_input_merged: v_input_images})
+                            #im = input_merged.eval(feed_dict={input_placeholder: input_images, t_X: X})
+                            #print("dis: ")
+                            #print(np.sum(im-v_input_images))
+                            if v_diff > 0:
+                                print("False attack")
+                                continue
+                            cv2.imwrite(img_save_dir+str(target_idx)+'.png', aimg)
                             print("ATTACK SUCCEED: sarfs add: "+str(len(idx)))
                             print("****************")
                             return 1
-
-                    t_alpha = tf.convert_to_tensor(a)     
         
         print("max iteration reached")
         a = t_alpha.eval()
@@ -386,9 +466,20 @@ def attack(target_idx):
             t_alpha = tf.convert_to_tensor(c)
             diff = fwd.eval(feed_dict={input_placeholder: input_images, t_X: X})
         
-            if diff <= 0.0:
+            if diff <= -0.01:
                 aimg = generate_adversarial_image(img, X, c)
-                cv2.imwrite('dct/attack/'+str(target_idx)+'.png', aimg)
+                v_input_images = []
+                fe = feature(aimg, blocksize, blockdim, fealen)
+                v_input_images.append(np.rollaxis(fe, 0, 3))
+                v_input_images = np.asarray(v_input_images)
+                v_diff = v_fwd.eval(feed_dict={v_input_merged: v_input_images})
+                #im = input_merged.eval(feed_dict={input_placeholder: input_images, t_X: X})
+                #print("dis: ")
+                #print(np.sum(im-v_input_images))
+                if v_diff > 0:
+                    print("False attack")
+                    continue
+                cv2.imwrite(img_save_dir+str(target_idx)+'.png', aimg)
                 print("ATTACK SUCCEED: sarfs add: "+str(len(idx)))
                 print("****************")
                 return 1
@@ -402,7 +493,12 @@ success = 0
 total = 0
 for id in idx[0]:
     if id < 0:
-        continue    
-    total += 1
-    success += attack3(id)
+        continue
+    if id >= 21514:
+        exit()
+
+    ret = attack(id)
+    if ret != -1:
+        total += 1
+        success += ret
     print("success attack: [ "+str(success)+" / "+str(total)+" ]")
