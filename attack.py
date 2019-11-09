@@ -405,7 +405,6 @@ def attack(target_idx):
             
             if iter % interval == 0:
                 a = t_alpha.eval()
-                #_t_alpha = t_alpha
                 diff = fwd.eval(feed_dict={input_placeholder: input_images, t_X: X})
                 if debug:
                     print("****************")
@@ -426,7 +425,7 @@ input_images, t_X: X}))
                     print(loss.eval(feed_dict={input_placeholder: input_images, t_X: X}))
                 
                 if diff < -0.0:
-                    interval = 1
+                    interval = 5
                     idx = []
                     b = np.copy(a)
                     for i in range(max_perturbation):
@@ -434,7 +433,6 @@ input_images, t_X: X}))
                         b = np.delete(b, idx[-1])
                         c = np.zeros(a.shape)
                         c[idx] = 1.0
-                        #t_alpha = tf.convert_to_tensor(c)
                         diff = fwd.eval(feed_dict={input_placeholder: input_images, t_X: X, t_alpha: c})
                         if diff <= -0.01:
                             aimg = generate_adversarial_image(img, X, c)
@@ -463,8 +461,7 @@ input_images, t_X: X}))
             b = np.delete(b, idx[-1])
             c = np.zeros(a.shape)
             c[idx] = 1.0
-            t_alpha = tf.convert_to_tensor(c)
-            diff = fwd.eval(feed_dict={input_placeholder: input_images, t_X: X})
+            diff = fwd.eval(feed_dict={input_placeholder: input_images, t_X: X, t_alpha: c})
         
             if diff <= -0.01:
                 aimg = generate_adversarial_image(img, X, c)
