@@ -386,9 +386,9 @@ def attack(target_idx, is_softmax=False):
     X=np.expand_dims(X, -1)/255
     t_X = tf.placeholder(dtype=tf.float32, shape=[max_candidates, imgdim, imgdim, 1])
     if not is_softmax:
-        alpha = -10.0 + np.zeros(max_candidates)
+        alpha = -10.0 + np.zeros((max_candidates,1))
         la = 1e5
-        t_alpha = tf.sigmoid(tf.get_variable(name='t_alpha', initializer=alpha))
+        t_alpha = tf.sigmoid(tf.cast(tf.get_variable(name='t_alpha', initializer=alpha), tf.float32))
         t_la = tf.cast(tf.Variable(la, name='t_la'), tf.float32)
     else:
         alpha = np.zeros(max_candidates)
@@ -487,7 +487,7 @@ def attack(target_idx, is_softmax=False):
                             print("****************")
                             return 1
                         else:
-                            #print (a.flatten())
+                            print (a.flatten())
                             print (diff)
 
             #if iter%10==0:
