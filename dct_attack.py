@@ -334,7 +334,7 @@ def validate_attack():
 Start attack
 '''
     
-def attack(target_idx, is_softmax=False):
+def attack(target_idx, is_softmax=True):
     tf.reset_default_graph()
     # test misclassification
     img, _ = get_image_from_input_id(test_list, target_idx)
@@ -391,8 +391,8 @@ def attack(target_idx, is_softmax=False):
         t_alpha = tf.sigmoid(tf.cast(tf.get_variable(name='t_alpha', initializer=alpha), tf.float32))
         t_la = tf.cast(tf.Variable(la, name='t_la'), tf.float32)
     else:
-        alpha = np.zeros((max_candidates,1))
-        t_alpha = tf.nn.softmax(tf.cast(tf.get_variable(name='t_alpha',initializer=alpha), tf.float32), axis=0)
+        alpha = np.zeros(max_candidates)
+        t_alpha = tf.nn.softmax(tf.get_variable(name='t_alpha', initializer=alpha))
 
     # dct
     #input_images = []
