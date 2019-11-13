@@ -334,7 +334,7 @@ def validate_attack():
 Start attack
 '''
     
-def attack(target_idx, is_softmax=True):
+def attack(target_idx, is_softmax=False):
     tf.reset_default_graph()
     # test misclassification
     img, _ = get_image_from_input_id(test_list, target_idx)
@@ -386,9 +386,9 @@ def attack(target_idx, is_softmax=True):
     X=np.expand_dims(X, -1)/255
     t_X = tf.placeholder(dtype=tf.float32, shape=[max_candidates, imgdim, imgdim, 1])
     if not is_softmax:
-        alpha = -10.0 + np.zeros((max_candidates,1))
+        alpha = -10.0 + np.zeros(max_candidates)
         la = 1e5
-        t_alpha = tf.sigmoid(tf.cast(tf.get_variable(name='t_alpha', initializer=alpha), tf.float32))
+        t_alpha = tf.sigmoid(tf.get_variable(name='t_alpha', initializer=alpha))
         t_la = tf.cast(tf.Variable(la, name='t_la'), tf.float32)
     else:
         alpha = np.zeros(max_candidates)
@@ -420,8 +420,8 @@ def attack(target_idx, is_softmax=True):
     if not is_softmax:
         loss = loss_1 + t_la * fwd
     else:
-        loss = 1e-5*loss_1 + fwd    
-
+        #loss = 1e-5*loss_1 + fwd    
+        loss = fwd
     t_vars = tf.trainable_variables()
     m_vars = [var for var in t_vars if 'model' in var.name]
     d_vars = [var for var in t_vars if 't_' in var.name]
@@ -442,6 +442,7 @@ def attack(target_idx, is_softmax=True):
             
             if iter % 1 == 0:
                 a = t_alpha.eval()
+                print(np.sum(a))
                 diff = fwd.eval(feed_dict={input_placeholder: img, t_X: X})
                 l2 =loss_1.eval(feed_dict={input_placeholder:img, t_X: X})
                 l=loss.eval(feed_dict={input_placeholder: img, t_X: X})
@@ -486,7 +487,7 @@ def attack(target_idx, is_softmax=True):
                             print("****************")
                             return 1
                         else:
-                            print (a.flatten())
+                            #print (a.flatten())
                             print (diff)
 
             #if iter%10==0:
