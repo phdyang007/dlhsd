@@ -6,6 +6,7 @@ import os
 os.environ["CUDA_VISIBLE_DEVICES"] = str(sys.argv[2])
 from progress.bar import Bar
 import pandas as pd
+import cv2
 
 '''
 Initialize Path and Global Params
@@ -25,27 +26,28 @@ aug  = 0
 '''
 Prepare the Input
 '''
+with open(test_path,"r") as testfile:
+    test_list = testfile.readlines()
 
-
-test_data = data(test_path, test_path+'/label.csv', preload=True)
-maxlen = test_data.maxlen
-x_data = tf.placeholder(tf.float32, shape=[None, blockdim*blockdim, fealen])              #input FT
-y_gt   = tf.placeholder(tf.float32, shape=[None, 2])                                      #ground truth label
-x      = tf.reshape(x_data, [-1, blockdim, blockdim, fealen])                               #ground truth label
+#test_data = data(test_path, test_path+'/label.csv', preload=False)
+#maxlen = test_data.maxlen
+x_data = tf.placeholder(tf.float32, shape=[None, 2048,2048, 1])              #input FT
+#y_gt   = tf.placeholder(tf.float32, shape=[None, 2])                                      #ground truth label
+#x      = tf.reshape(x_data, [-1, blockdim, blockdim, fealen])                               #ground truth label
                                      #ground truth label without bias
                             #reshap to NHWC
 #predict= forward(x, is_training=False)    
 
 
 
-x      = tf.reshape(x_data, [-1, blockdim, blockdim, fealen])                             #reshap to NHWC
-x_ud   = tf.map_fn(lambda img: tf.image.flip_up_down(img), x)                   #up down flipped
-x_lr   = tf.map_fn(lambda img: tf.image.flip_left_right(img), x)                #left right flipped
-x_lu   = tf.map_fn(lambda img: tf.image.flip_up_down(img), x_lr)                #both flipped
-predict_or = forward(x, is_training=False)                                      #do forward
-predict_ud = forward(x_ud, is_training=False, reuse=True)  
-predict_lr = forward(x_lr, is_training=False, reuse=True)
-predict_lu = forward(x_lu, is_training=False, reuse=True)
+#x      = tf.reshape(x_data, [-1, blockdim, blockdim, fealen])                             #reshap to NHWC
+#x_ud   = tf.map_fn(lambda img: tf.image.flip_up_down(img), x)                   #up down flipped
+#x_lr   = tf.map_fn(lambda img: tf.image.flip_left_right(img), x)                #left right flipped
+#x_lu   = tf.map_fn(lambda img: tf.image.flip_up_down(img), x_lr)                #both flipped
+predict_or = forward_dct(x_data, is_training=False)                                      #do forward
+#predict_ud = forward(x_ud, is_training=False, reuse=True)  
+#predict_lr = forward(x_lr, is_training=False, reuse=True)
+#predict_lu = forward(x_lu, is_training=False, reuse=True)
 if aug==1:
     predict = (predict_or + predict_lr + predict_lu + predict_ud)/4.0
 else:
@@ -84,6 +86,22 @@ with tf.Session(config=config) as sess:
     ahs = 0   #actual hs
     anhs= 0   #actual hs
     start   = time.time()
+    bar = Bar('Detecting', max=400)
+    for titr in range(400):
+        
+        tdata = cv2.imread(test_list[titr].split()[0],0)/255
+        tdata = np.reshape(tdata, [1, 2048, 2048, 1])
+        tlabel=np.array([[0,1]])
+        tmp_y    = y.eval(feed_dict={x_data: tdata, y_gt: tlabel})
+        tmp_label= np.argmax(tlabel, axis=1)
+        tmp      = tmp_label+tmp_y
+        chs += sum(tmp==2)
+        cnhs+= sum(tmp==0)
+        ahs += sum(tmp_label)
+        anhs+= sum(tmp_label==0)
+        bar.next()
+    bar.finish()
+    """
     bar = Bar('Detecting', max=test_data.maxlen//bs+1)
     for titr in range(0, test_data.maxlen//bs+1):
         if not titr == test_data.maxlen//bs:
@@ -101,6 +119,7 @@ with tf.Session(config=config) as sess:
         anhs+= sum(tmp_label==0)
         bar.next()
     bar.finish()
+    """
     print (chs, ahs, cnhs, anhs)
     if not ahs ==0:
         hs_accu = 1.0*chs/ahs

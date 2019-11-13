@@ -291,20 +291,22 @@ def get_dct_kernel(block_size, fealen):
     return np.expand_dims(kernel, axis = 2)
 
 
+dct_w = np.expand_dims(np.moveaxis(np.load('dct_filter.npy'), 0, -1), 2)
+
 try:
     import tensorflow as tf
     import tensorflow.contrib.slim as slim
 
 
 
-    def forward_dct(input, dct_kernel, is_training=True, reuse=tf.AUTO_REUSE, scope='model'):
+    def forward_dct(input, is_training=True, reuse=tf.AUTO_REUSE, scope='model'):
 
         with tf.variable_scope(scope, reuse=reuse):
             with slim.arg_scope([slim.conv2d], activation_fn=tf.nn.relu, stride=1, padding='SAME',
                                 weights_initializer=tf.contrib.layers.xavier_initializer(uniform=False),
                                 biases_initializer=tf.constant_initializer(0.0)):
 
-                net = tf.nn.conv2d(input, dct_kernel, strides = [1, dct_kernel.shape[0], dct_kernel.shape[1], 1], padding = 'VALID')
+                net = tf.nn.conv2d(input, dct_w, strides = [1, dct_w.shape[0], dct_w.shape[1], 1], padding = 'VALID')
                 net = slim.conv2d(net, 16, [3, 3], scope='conv1_1')
                 net = slim.conv2d(net, 16, [3, 3], scope='conv1_2')
                 net = slim.max_pool2d(net, [2, 2], stride=2, padding='SAME', scope='pool1')
@@ -313,7 +315,7 @@ try:
                 net = slim.max_pool2d(net, [2, 2], stride=2, padding='SAME', scope='pool2')
                 net = slim.flatten(net)
                 w_init = tf.contrib.layers.xavier_initializer(uniform=False)
-                net = slim.fully_connected(net, 250, activation_fn=tf.nn.relu, scope='fc1')
+                net = slim.fully_connected(net, 256, activation_fn=tf.nn.relu, scope='fc1')
                 net = slim.dropout(net, 0.5, is_training=is_training, scope='dropout')
                 predict = slim.fully_connected(net, 2, activation_fn=None, scope='fc2')
         return predict
