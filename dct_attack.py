@@ -3,6 +3,8 @@ import cv2
 import numpy as np
 from model import *
 import configparser as cp
+from datetime import datetime
+import time
 import sys
 import time
 import os
@@ -144,11 +146,14 @@ def load_candidates(sub_dir="generate_sraf_sub/", add_dir="generate_sraf_add/"):
     return np.array(X)
 
 def generate_adversarial_image(img, X, alpha):
+    for i in range(len(alpha)):
+        img += alpha[i]*X[i]
     img = img.astype(np.int32)
+    final = np.reshape(img, [imgdim, imgdim])
     #X = np.absolute(X).astype(np.int32)
-    X = X.astype(np.int32)
-    alpha = alpha.astype(np.int32)
-    return (img+np.sum(X*np.expand_dims(alpha,-1),axis=0)).astype(np.uint8)
+    #X = X.astype(np.int32)
+    #alpha = alpha.astype(np.int32)
+    return final
 
 '''
 Initialize Path and Global Params
@@ -169,13 +174,16 @@ _max_candidates = int(infile.get('attack', 'max_candidates'))
 max_perturbation = int(infile.get('attack', 'max_perturbation'))
 alpha_threshold = float(infile.get('attack', 'alpha_threshold'))
 attack_path = infile.get('attack', 'attack_path_txt')
-img_save_dir = 'dct/attack3_'+str(_max_candidates)+'_'+str(max_iter)+'/'
+img_save_dir = 'dct/attack1_'+str(_max_candidates)+'_'+str(max_iter)+'/'
 sraf_changed = np.zeros(20)
 iteration_used = np.zeros(200)
     
 '''
 Prepare the Input
 '''
+for item in test_list:
+    print (item.split())
+
 test_list_hs = [int(item.split()[1]) for item in test_list]
 test_list_hs = np.array(test_list_hs)
 idx = np.where(test_list_hs == 1) #total = 80152, hs = 6107
@@ -330,9 +338,11 @@ def attack(target_idx, is_softmax=False):
     tf.reset_default_graph()
     # test misclassification
     img, _ = get_image_from_input_id(test_list, target_idx)
-    v_input_merged = tf.placeholder(dtype=tf.float32, shape=[1, blockdim, blockdim, fealen])
+    img = img/255
+    img = np.reshape(img, [1,imgdim, imgdim,1])
+    v_input_merged = tf.placeholder(dtype=tf.float32, shape=[1, imgdim, imgdim, 1])
     
-    v_predict = forward(v_input_merged,is_training=False)
+    v_predict = forward_dct(v_input_merged,is_training=False)
     v_nhs_pre, v_hs_pre = tf.split(v_predict, [1, 1], 1)
     v_fwd = tf.subtract(v_hs_pre, v_nhs_pre)
     
@@ -356,24 +366,25 @@ def attack(target_idx, is_softmax=False):
         saver    = tf.train.Saver(m_vars)
         saver.restore(sess, os.path.join(model_path, ckpt_name))
         
-        v_input_images = []
-        fe = feature(img, blocksize, blockdim, fealen)
-        v_input_images.append(np.rollaxis(fe, 0, 3))
-        v_input_images = np.asarray(v_input_images)
-        v_diff = v_fwd.eval(feed_dict={v_input_merged: v_input_images})
-        if v_diff < -0.01:
+        #v_input_images = []
+        #fe = feature(img, blocksize, blockdim, fealen)
+        #v_input_images.append(np.rollaxis(fe, 0, 3))
+        #v_input_images = np.reshape(img, [1, imgdim, imgdim, 1])
+        v_diff = v_fwd.eval(feed_dict={v_input_merged: img})
+        if v_diff < 0:
             print("misclassification")
             return -1
     
     print("start attacking on id: "+str(target_idx))
     max_candidates = _max_candidates
     # generate candidates
-    X = generate_candidates(test_list, target_idx, sub_only=True)
+    X = generate_candidates(test_list, target_idx, sub_only=False)
     np.random.shuffle(X)
     if max_candidates > X.shape[0]:
         max_candidates = X.shape[0]
     X = X[:max_candidates]
-    t_X = tf.placeholder(dtype=tf.float32, shape=[max_candidates, imgdim, imgdim])
+    X=np.expand_dims(X, -1)/255
+    t_X = tf.placeholder(dtype=tf.float32, shape=[max_candidates, imgdim, imgdim, 1])
     if not is_softmax:
         alpha = -10.0 + np.zeros((max_candidates,1))
         la = 1e5
@@ -385,23 +396,25 @@ def attack(target_idx, is_softmax=False):
 initializer=alpha), tf.float32), axis=0)
 
     # dct
-    input_images = []
-    fe = feature(img, blocksize, blockdim, fealen)
-    input_images.append(np.rollaxis(fe, 0, 3))
-    for item in X:
-        fe = feature(item, blocksize, blockdim, fealen)
-        input_images.append(np.rollaxis(fe, 0, 3))
-    input_images = np.asarray(input_images)
+    #input_images = []
+    #fe = feature(img, blocksize, blockdim, fealen)
+    #input_images.append(np.rollaxis(fe, 0, 3))
+    #for item in X:
+    #    fe = feature(item, blocksize, blockdim, fealen)
+    #    input_images.append(np.rollaxis(fe, 0, 3))
+    #input_images = np.asarray(input_images)
         
-    input_placeholder = tf.placeholder(dtype=tf.float32, shape=[max_candidates + 1, blockdim, blockdim, fealen])
-    perturbation = tf.zeros(dtype=tf.float32, shape=[1, blockdim, blockdim, fealen])
+    input_placeholder = tf.placeholder(dtype=tf.float32, shape=[1, imgdim, imgdim, 1])
+    perturbation = tf.zeros(dtype=tf.float32, shape=[1, imgdim, imgdim, 1])
+    lr_holder = tf.placeholder(dtype=tf.float32)
+    lr = 1.0
     for i in range(max_candidates):
-        perturbation += t_alpha[i] * input_placeholder[i+1]
-    input_merged = input_placeholder[0]+perturbation
+        perturbation += t_alpha[i] * t_X[i]
+    input_merged = input_placeholder+perturbation
 
-    loss_1 = tf.norm(tf.reduce_sum(t_X * tf.reshape(t_alpha, [tf.shape(t_alpha)[0],1,1]), axis=0), 2)
+    loss_1 = tf.norm(t_alpha)
 
-    predict = forward(input_merged,is_training=False)
+    predict = forward_dct(input_merged,is_training=False)
     nhs_pre, hs_pre = tf.split(predict, [1, 1], 1)
     fwd = tf.subtract(hs_pre, nhs_pre)
     
@@ -424,63 +437,62 @@ initializer=alpha), tf.float32), axis=0)
         saver.restore(sess, os.path.join(model_path, ckpt_name))
         
         interval = 10
-        
+        start = time.time()
         for iter in range(max_iter):
-            opt.run(feed_dict={input_placeholder: input_images, t_X: X})
+            opt.run(feed_dict={input_placeholder: img, t_X: X, lr_holder:lr})
             
-            if iter % interval == 0:
+            if iter % 1 == 0:
                 a = t_alpha.eval()
-                diff = fwd.eval(feed_dict={input_placeholder: input_images, t_X: X})
+                diff = fwd.eval(feed_dict={input_placeholder: img, t_X: X})
+                l2 =loss_1.eval(feed_dict={input_placeholder:img, t_X: X})
+                l=loss.eval(feed_dict={input_placeholder: img, t_X: X})
+                lambdas =t_la.eval()
                 if debug:
-                    print("****************")
-                    print("alpha:")
-                    print(a)
-                    
-                    if not is_softmax:
-                        print("lambda:")
-                        print(t_la.eval())
-                    
-                    print("fwd:")
-                    print(diff)
-                    
-                    print("loss_1:")
-                    print(loss_1.eval(feed_dict={input_placeholder:
-input_images, t_X: X}))
+                    #print("****************")
+                    #print("alpha:")
+                    #print(a)
+                    format_str = ('%s: step %d, loss = %.2f, diff = %f, l2_loss = %f, lambda = %f')
+                    print (format_str % (datetime.now(), iter, l, diff, l2, lambdas))
    
-                    print("loss:")
-                    print(loss.eval(feed_dict={input_placeholder: input_images, t_X: X}))
+                    
+
                 
-                if diff < 0.5:
+                if diff < 0:
        
                     idx = []
                     b = np.copy(a)
-                    for i in range(max_perturbation):
+                    for i in range(min(int(diff)+1,max_perturbation)):
                         idx.append(np.argmax(b))
                         b = np.delete(b, idx[-1])
                         c = np.zeros(a.shape)
                         c[idx] = 1.0
-                        diff = fwd.eval(feed_dict={input_placeholder: input_images, t_X: X, t_alpha: c})
-                        if diff <= -0.01:
+                        diff = fwd.eval(feed_dict={input_placeholder: img, t_X: X, t_alpha: c})
+                        if diff < 0:
                             aimg = generate_adversarial_image(img, X, c)
-                            v_input_images = []
-                            fe = feature(aimg, blocksize, blockdim, fealen)
-                            v_input_images.append(np.rollaxis(fe, 0, 3))
-                            v_input_images = np.asarray(v_input_images)
-                            v_diff = v_fwd.eval(feed_dict={v_input_merged: v_input_images})
+                            #v_input_images = []
+                            #fe = feature(aimg, blocksize, blockdim, fealen)
+                            #v_input_images.append(np.rollaxis(fe, 0, 3))
+                            #v_input_images = np.asarray(v_input_images)
+                            #v_diff = v_fwd.eval(feed_dict={v_input_merged: aimg})
                             #im = input_merged.eval(feed_dict={input_placeholder: input_images, t_X: X})
                             #print("dis: ")
                             #print(np.sum(im-v_input_images))
-                            if v_diff > 0:
-                                print("False attack")
-                                continue
-                            cv2.imwrite(img_save_dir+str(target_idx)+'.png', aimg)
-                            sraf_changed[i] += 1
+                            #if v_diff > 0:
+                            #   print("False attack")
+                            #    continue
+                            #cv2.imwrite(img_save_dir+str(target_idx)+'.png', aimg)
+                            sraf_changed = i
                             iteration_used[iter-1] += 1
                             print("ATTACK SUCCEED: sarfs add: "+str(len(idx))+", iterations: "+str(iter))
                             print("****************")
                             return 1
-        
+
+            #if iter%10==0:
+            #    lr=lr*0.5
         print("max iteration reached")
+        end=time.time()
+        print("Attack runtime is: ", end-start)
+        """
         a = t_alpha.eval()
         idx = []
         b = np.copy(a)
@@ -511,7 +523,7 @@ input_images, t_X: X}))
                 print("ATTACK SUCCEED: sarfs add: "+str(len(idx))+", iterations: "+str(max_iter))
                 print("****************")
                 return 1
-        
+        """
         print("ATTACK FAIL: sraf not enough")
         print("****************")
         return 0
@@ -535,3 +547,5 @@ for id in idx[0]:
         total += 1
         success += ret
     print("success attack: [ "+str(success)+" / "+str(total)+" ]")
+
+    #quit()
