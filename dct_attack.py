@@ -460,7 +460,7 @@ def attack(target_idx, is_softmax=False):
        
                     idx = []
                     b = np.copy(a)
-                    for i in range(min(int(diff)+1,max_perturbation)):
+                    for i in range(max_perturbation):
                         idx.append(np.argmax(b))
                         b = np.delete(b, idx[-1])
                         c = np.zeros(a.shape)
@@ -485,6 +485,9 @@ def attack(target_idx, is_softmax=False):
                             print("ATTACK SUCCEED: sarfs add: "+str(len(idx))+", iterations: "+str(iter))
                             print("****************")
                             return 1
+                        else:
+                            print (a.flatten())
+                            print (diff)
 
             #if iter%10==0:
             #    lr=lr*0.5
