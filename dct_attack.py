@@ -8,7 +8,7 @@ import time
 import sys
 import time
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = str(sys.argv[2])
+#os.environ["CUDA_VISIBLE_DEVICES"] = str(sys.argv[2])
 debug = True
 
 def get_image_from_input_id(test_file_list, id):
@@ -72,7 +72,7 @@ def _generate_sraf_add(img, vias, srafs, insert_shape=[40,90], save_img=False, s
     add = []
     min_dis_to_vias = 100
     max_dis_to_vias = 500
-    min_dis_to_sraf = 60
+    min_dis_to_sraf = 40
     black_img_ = np.zeros((2048, 2048)).astype(np.uint8)
     black_img = np.copy(black_img_)
     for item in vias:
@@ -352,16 +352,16 @@ def attack(target_idx, is_softmax=False):
     '''
     Config and model
     '''
-    config = tf.ConfigProto()
-    config.gpu_options.allow_growth = True
-    config.gpu_options.per_process_gpu_memory_fraction = 0.9
+    #config = tf.ConfigProto()
+    #config.gpu_options.allow_growth = True
+    #config.gpu_options.per_process_gpu_memory_fraction = 0.9
 
 
     ckpt = tf.train.get_checkpoint_state(model_path)
     if ckpt and ckpt.model_checkpoint_path:
         ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
         
-    with tf.Session(config=config) as sess:
+    with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
         saver    = tf.train.Saver(m_vars)
         saver.restore(sess, os.path.join(model_path, ckpt_name))
@@ -379,10 +379,10 @@ def attack(target_idx, is_softmax=False):
     max_candidates = _max_candidates
     # generate candidates
     X = generate_candidates(test_list, target_idx, sub_only=False)
-    np.random.shuffle(X)
+    #np.random.shuffle(X)
     if max_candidates > X.shape[0]:
         max_candidates = X.shape[0]
-    X = X[:max_candidates]
+    #X = X[:max_candidates]
     X=np.expand_dims(X, -1)/255
     t_X = tf.placeholder(dtype=tf.float32, shape=[max_candidates, imgdim, imgdim, 1])
     if not is_softmax:
@@ -392,8 +392,7 @@ def attack(target_idx, is_softmax=False):
         t_la = tf.cast(tf.Variable(la, name='t_la'), tf.float32)
     else:
         alpha = np.zeros((max_candidates,1))
-        t_alpha = tf.nn.softmax(tf.cast(tf.get_variable(name='t_alpha',
-initializer=alpha), tf.float32), axis=0)
+        t_alpha = tf.nn.softmax(tf.cast(tf.get_variable(name='t_alpha',initializer=alpha), tf.float32), axis=0)
 
     # dct
     #input_images = []
@@ -406,7 +405,7 @@ initializer=alpha), tf.float32), axis=0)
         
     input_placeholder = tf.placeholder(dtype=tf.float32, shape=[1, imgdim, imgdim, 1])
     perturbation = tf.zeros(dtype=tf.float32, shape=[1, imgdim, imgdim, 1])
-    lr_holder = tf.placeholder(dtype=tf.float32)
+    #lr_holder = tf.placeholder(dtype=tf.float32)
     lr = 1.0
     for i in range(max_candidates):
         perturbation += t_alpha[i] * t_X[i]
@@ -431,7 +430,7 @@ initializer=alpha), tf.float32), axis=0)
     '''
     first attack method by minimizing L(alpha, lambda)
     '''
-    with tf.Session(config=config) as sess:
+    with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
         saver    = tf.train.Saver(m_vars)
         saver.restore(sess, os.path.join(model_path, ckpt_name))
@@ -439,7 +438,7 @@ initializer=alpha), tf.float32), axis=0)
         interval = 10
         start = time.time()
         for iter in range(max_iter):
-            opt.run(feed_dict={input_placeholder: img, t_X: X, lr_holder:lr})
+            opt.run(feed_dict={input_placeholder: img, t_X: X})
             
             if iter % 1 == 0:
                 a = t_alpha.eval()
