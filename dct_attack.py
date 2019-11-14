@@ -490,7 +490,7 @@ def attack(target_idx, is_softmax=False):
                             #   print("False attack")
                             #    continue
                             #cv2.imwrite(img_save_dir+str(target_idx)+'.png', aimg)
-                            sraf_changed = i
+                            #sraf_changed[] = i
                             iteration_used[iter-1] += 1
                             print("ATTACK SUCCEED: sarfs add: "+str(len(idx))+", iterations: "+str(iter))
                             print("****************")
