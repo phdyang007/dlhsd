@@ -175,7 +175,7 @@ _max_candidates = int(infile.get('attack', 'max_candidates'))
 max_perturbation = int(infile.get('attack', 'max_perturbation'))
 alpha_threshold = float(infile.get('attack', 'alpha_threshold'))
 attack_path = infile.get('attack', 'attack_path_txt')
-img_save_dir = 'dct/attack1_'+str(_max_candidates)+'_'+str(max_iter)+'/'
+img_save_dir = infile.get('attack', 'attack_img')
 sraf_changed = np.zeros(20)
 iteration_used = np.zeros(200)
     
@@ -495,6 +495,7 @@ def attack(target_idx, is_softmax=False):
                             print("ATTACK SUCCEED: sarfs add: "+str(len(idx))+", iterations: "+str(iter))
                             print("****************")
                             end=time.time()
+                            cv2.imwrite(os.path.join(img_save_dir,str(target_idx)+'.png'), aimg*255)
                             print("Attack runtime is: ", end-start)
                             return 1
                         else:
