@@ -10,7 +10,7 @@ import time
 import os
 #os.environ["CUDA_VISIBLE_DEVICES"] = str(sys.argv[2])
 debug = True
-
+np.random.seed(13)
 def get_image_from_input_id(test_file_list, id):
     '''
     return a image and its label
@@ -54,7 +54,7 @@ def _find_vias(shapes_):
     
 def _generate_sraf_sub(srafs, save_img=False, save_dir="generate_sraf_sub/"):
     sub = []
-    black_img_ = np.zeros((2048, 2048)).astype(np.uint8)
+    black_img_ = np.zeros((2048, 2048)).astype(np.int16)
     for item in srafs:
         black_img = np.copy(black_img_)
         black_img[item[0]:item[0]+item[2], item[1]:item[1]+item[3]] = -255
@@ -73,7 +73,7 @@ def _generate_sraf_add(img, vias, srafs, insert_shape=[40,90], save_img=False, s
     min_dis_to_vias = 100
     max_dis_to_vias = 500
     min_dis_to_sraf = 40
-    black_img_ = np.zeros((2048, 2048)).astype(np.uint8)
+    black_img_ = np.zeros((2048, 2048)).astype(np.int16)
     black_img = np.copy(black_img_)
     for item in vias:
         center = [item[0]+int(item[2]/2), item[1]+int(item[3]/2)]
@@ -88,8 +88,9 @@ def _generate_sraf_add(img, vias, srafs, insert_shape=[40,90], save_img=False, s
         for j in range(1, black_img.shape[1]-1):
             if black_img[i][j] == 0:
                 continue
-            shape = np.random.randint(insert_shape[0], high=insert_shape[1]+1, size=2)
-            shape[np.random.randint(0,high=2)] = 40
+            #shape = np.random.randint(insert_shape[0], high=insert_shape[1]+1, size=2)
+            #shape[np.random.randint(0,high=2)] = 40
+            shape = np.array([40,40])
             if i+shape[0] <= black_img.shape[0] and j+shape[1] <= black_img.shape[1] and np.all(black_img[i:i+shape[0],j:j+shape[1]] == 255):
                 img = np.copy(black_img_)
                 img[i:i+shape[0],j:j+shape[1]] = 255
@@ -406,7 +407,7 @@ def attack(target_idx, is_softmax=False):
     input_placeholder = tf.placeholder(dtype=tf.float32, shape=[1, imgdim, imgdim, 1])
     perturbation = tf.zeros(dtype=tf.float32, shape=[1, imgdim, imgdim, 1])
     #lr_holder = tf.placeholder(dtype=tf.float32)
-    lr = 1.0
+    #lr = 0.5
     for i in range(max_candidates):
         perturbation += t_alpha[i] * t_X[i]
     input_merged = input_placeholder+perturbation
@@ -416,9 +417,11 @@ def attack(target_idx, is_softmax=False):
     predict = forward_dct(input_merged,is_training=False)
     nhs_pre, hs_pre = tf.split(predict, [1, 1], 1)
     fwd = tf.subtract(hs_pre, nhs_pre)
-    
+    predict2 = forward_dct(input_placeholder, is_training=False)
+    nhs_pre2, hs_pre2 = tf.split(predict2, [1, 1], 1)
+    fwd2 = tf.subtract(hs_pre2, nhs_pre2)
     if not is_softmax:
-        loss = loss_1 + t_la * fwd
+        loss = loss_1+  1e5*fwd
     else:
         #loss = 1e-5*loss_1 + fwd    
         loss = fwd
@@ -441,32 +444,38 @@ def attack(target_idx, is_softmax=False):
             opt.run(feed_dict={input_placeholder: img, t_X: X})
             
             if iter % 1 == 0:
-                a = t_alpha.eval()
-                print(np.sum(a))
+                
+                #print(np.sum(a))
                 diff = fwd.eval(feed_dict={input_placeholder: img, t_X: X})
                 l2 =loss_1.eval(feed_dict={input_placeholder:img, t_X: X})
-                l=loss.eval(feed_dict={input_placeholder: img, t_X: X})
+                #l=loss.eval(feed_dict={input_placeholder: img, t_X: X})
                 lambdas =t_la.eval()
                 if debug:
                     #print("****************")
                     #print("alpha:")
                     #print(a)
-                    format_str = ('%s: step %d, loss = %.2f, diff = %f, l2_loss = %f, lambda = %f')
-                    print (format_str % (datetime.now(), iter, l, diff, l2, lambdas))
+                    format_str = ('%s: step %d, diff = %f, l2_loss = %f, lambda = %f')
+                    print (format_str % (datetime.now(), iter, diff, l2, lambdas))
    
                     
 
                 
                 if diff < 0:
-       
+                    a = t_alpha.eval()
                     idx = []
                     b = np.copy(a)
+                    #mxtmp =min(max_perturbation,np.sum(int(b>alpha_threshold)))
+                    #if mxtmp ==0:
+                    #    mxtmp=max_perturbation
                     for i in range(max_perturbation):
                         idx.append(np.argmax(b))
-                        b = np.delete(b, idx[-1])
+                        b[idx[-1]]=0
                         c = np.zeros(a.shape)
                         c[idx] = 1.0
-                        diff = fwd.eval(feed_dict={input_placeholder: img, t_X: X, t_alpha: c})
+                        img_tmp=img
+                        for j in range(len(c)):
+                            img_tmp += c[j]*X[j]
+                        diff = fwd2.eval(feed_dict={input_placeholder: img_tmp})
                         if diff < 0:
                             aimg = generate_adversarial_image(img, X, c)
                             #v_input_images = []
@@ -485,9 +494,11 @@ def attack(target_idx, is_softmax=False):
                             iteration_used[iter-1] += 1
                             print("ATTACK SUCCEED: sarfs add: "+str(len(idx))+", iterations: "+str(iter))
                             print("****************")
+                            end=time.time()
+                            print("Attack runtime is: ", end-start)
                             return 1
                         else:
-                            print (a.flatten())
+                            #print (a.flatten())
                             print (diff)
 
             #if iter%10==0:
