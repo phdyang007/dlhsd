@@ -71,34 +71,34 @@ bs = 512
 #cvs = df.read_csv(os.path.join(model_path,"cv.csv"), usecols=['step','acc'])
 #step = int(cvs[np.argmax(cvs.acc.values])
 
-ckpt = tf.train.get_checkpoint_state(model_path)
-if ckpt and ckpt.model_checkpoint_path:
-    ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
-    print(ckpt_name)
+#ckpt = tf.train.get_checkpoint_state(model_path)
+#if ckpt and ckpt.model_checkpoint_path:
+#    ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
+#    print(ckpt_name)
 
 
 with tf.Session(config=config) as sess:
     sess.run(tf.global_variables_initializer())
     saver    = tf.train.Saver()
-    saver.restore(sess, os.path.join(model_path, ckpt_name))
+    saver.restore(sess, os.path.join(model_path, "model-9999.ckpt"))
     chs = 0   #correctly predicted hs
     cnhs= 0   #correctly predicted nhs
     ahs = 0   #actual hs
     anhs= 0   #actual hs
     start   = time.time()
     bar = Bar('Detecting', max=400)
-    for titr in range(400):
-        
+    for titr in range(len(test_list)):
+        print(test_list[titr].split()[0])
         tdata = cv2.imread(test_list[titr].split()[0],0)/255
         tdata = np.reshape(tdata, [1, 2048, 2048, 1])
-        tlabel=np.array([[0,1]])
-        tmp_y    = y.eval(feed_dict={x_data: tdata, y_gt: tlabel})
-        tmp_label= np.argmax(tlabel, axis=1)
-        tmp      = tmp_label+tmp_y
-        chs += sum(tmp==2)
-        cnhs+= sum(tmp==0)
-        ahs += sum(tmp_label)
-        anhs+= sum(tmp_label==0)
+ 
+        tmp_y = predict.eval(feed_dict={x_data: tdata})
+        print(tmp_y)
+        if tmp_y[0,0]-tmp_y[0,1]<0:
+            chs+=1
+
+        ahs += 1
+
         bar.next()
     bar.finish()
     """
@@ -120,16 +120,14 @@ with tf.Session(config=config) as sess:
         bar.next()
     bar.finish()
     """
-    print (chs, ahs, cnhs, anhs)
+
     if not ahs ==0:
         hs_accu = 1.0*chs/ahs
-    else:
-        hs_accu = 0
-    fs      = anhs - cnhs
+
     end       = time.time()
-print (ahs, anhs)
+
 print('Hotspot Detection Accuracy is %f'%hs_accu)
-print('False Alarm is %f'%fs)
+
 print('Test Runtime is %f seconds'%(end-start))
     
 

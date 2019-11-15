@@ -389,8 +389,8 @@ def attack(target_idx, is_softmax=False):
     if not is_softmax:
         alpha = -10.0 + np.zeros((max_candidates,1))
         la = 1e5
-        t_alpha = tf.sigmoid(tf.cast(tf.get_variable(name='t_alpha', initializer=alpha), tf.float32))
-        t_la = tf.cast(tf.Variable(la, name='t_la'), tf.float32)
+        t_alpha = tf.sigmoid(tf.cast(tf.get_variable(name='alpha', initializer=alpha), tf.float32))
+        #t_la = tf.cast(tf.Variable(la, name='t_la'), tf.float32)
     else:
         alpha = np.zeros(max_candidates)
         t_alpha = tf.nn.softmax(tf.get_variable(name='t_alpha', initializer=alpha))
@@ -427,7 +427,7 @@ def attack(target_idx, is_softmax=False):
         loss = fwd
     t_vars = tf.trainable_variables()
     m_vars = [var for var in t_vars if 'model' in var.name]
-    d_vars = [var for var in t_vars if 't_' in var.name]
+    d_vars = [var for var in t_vars if 'alpha' in var.name]
     opt = tf.train.RMSPropOptimizer(lr).minimize(loss, var_list=d_vars)
 
     '''
@@ -449,13 +449,13 @@ def attack(target_idx, is_softmax=False):
                 diff = fwd.eval(feed_dict={input_placeholder: img, t_X: X})
                 l2 =loss_1.eval(feed_dict={input_placeholder:img, t_X: X})
                 #l=loss.eval(feed_dict={input_placeholder: img, t_X: X})
-                lambdas =t_la.eval()
+                #lambdas =t_la.eval()
                 if debug:
                     #print("****************")
                     #print("alpha:")
                     #print(a)
                     format_str = ('%s: step %d, diff = %f, l2_loss = %f, lambda = %f')
-                    print (format_str % (datetime.now(), iter, diff, l2, lambdas))
+                    print (format_str % (datetime.now(), iter, diff, l2, 0.0))
    
                     
 
@@ -475,9 +475,14 @@ def attack(target_idx, is_softmax=False):
                         img_tmp=img
                         for j in range(len(c)):
                             img_tmp += c[j]*X[j]
+                        img_tmp=img_tmp.astype(int)
+                        print(np.max(img_tmp), np.min(img_tmp))
+                        print(img_tmp.shape)
                         diff = fwd2.eval(feed_dict={input_placeholder: img_tmp})
                         if diff < 0:
-                            aimg = generate_adversarial_image(img, X, c)
+                            print(diff)
+                            #print(np.min(img_tmp))
+                            #aimg = generate_adversarial_image(img, X, c)
                             #v_input_images = []
                             #fe = feature(aimg, blocksize, blockdim, fealen)
                             #v_input_images.append(np.rollaxis(fe, 0, 3))
@@ -495,7 +500,7 @@ def attack(target_idx, is_softmax=False):
                             print("ATTACK SUCCEED: sarfs add: "+str(len(idx))+", iterations: "+str(iter))
                             print("****************")
                             end=time.time()
-                            cv2.imwrite(os.path.join(img_save_dir,str(target_idx)+'.png'), aimg*255)
+                            cv2.imwrite(os.path.join(img_save_dir,str(target_idx)+'.png'), img_tmp[0,:,:,0]*255)
                             print("Attack runtime is: ", end-start)
                             return 1
                         else:
