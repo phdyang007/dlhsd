@@ -70,8 +70,8 @@ def _generate_sraf_sub(srafs, save_img=False, save_dir="generate_sraf_sub/"):
 
 def _generate_sraf_add(img, vias, srafs, insert_shape=[40,90], save_img=False, save_dir="generate_sraf_add/"):
     add = []
-    min_dis_to_vias = 100
-    max_dis_to_vias = 500
+    min_dis_to_vias = 135
+    max_dis_to_vias = 535
     min_dis_to_sraf = 40
     black_img_ = np.zeros((2048, 2048)).astype(np.int16)
     black_img = np.copy(black_img_)
@@ -88,9 +88,9 @@ def _generate_sraf_add(img, vias, srafs, insert_shape=[40,90], save_img=False, s
         for j in range(1, black_img.shape[1]-1):
             if black_img[i][j] == 0:
                 continue
-            #shape = np.random.randint(insert_shape[0], high=insert_shape[1]+1, size=2)
-            #shape[np.random.randint(0,high=2)] = 40
-            shape = np.array([40,40])
+            shape = np.random.randint(insert_shape[0], high=insert_shape[1]+1, size=2)
+            shape[np.random.randint(0,high=2)] = 40
+            #shape = np.array([40,40])
             if i+shape[0] <= black_img.shape[0] and j+shape[1] <= black_img.shape[1] and np.all(black_img[i:i+shape[0],j:j+shape[1]] == 255):
                 img = np.copy(black_img_)
                 img[i:i+shape[0],j:j+shape[1]] = 255
@@ -176,7 +176,7 @@ max_perturbation = int(infile.get('attack', 'max_perturbation'))
 alpha_threshold = float(infile.get('attack', 'alpha_threshold'))
 attack_path = infile.get('attack', 'attack_path_txt')
 img_save_dir = infile.get('attack', 'attack_img')
-sraf_changed = np.zeros(20)
+#sraf_changed = np.zeros(20)
 iteration_used = np.zeros(200)
     
 '''
@@ -440,73 +440,130 @@ def attack(target_idx, is_softmax=False):
         
         interval = 10
         start = time.time()
+        sraf_changed = 0
+        indices=[]
         for iter in range(max_iter):
             opt.run(feed_dict={input_placeholder: img, t_X: X})
             
-            if iter % 1 == 0:
+            #if iter % 1 == 0:
                 
-                #print(np.sum(a))
-                diff = fwd.eval(feed_dict={input_placeholder: img, t_X: X})
-                l2 =loss_1.eval(feed_dict={input_placeholder:img, t_X: X})
-                #l=loss.eval(feed_dict={input_placeholder: img, t_X: X})
-                #lambdas =t_la.eval()
-                if debug:
-                    #print("****************")
-                    #print("alpha:")
-                    #print(a)
-                    format_str = ('%s: step %d, diff = %f, l2_loss = %f, lambda = %f')
-                    print (format_str % (datetime.now(), iter, diff, l2, 0.0))
-   
-                    
+            #print(np.sum(a))
+            diff = fwd.eval(feed_dict={input_placeholder: img, t_X: X})
+            l2 =loss_1.eval(feed_dict={input_placeholder:img, t_X: X})
+            #l=loss.eval(feed_dict={input_placeholder: img, t_X: X})
+            #lambdas =t_la.eval()
+            if debug:
+                #print("****************")
+                #print("alpha:")
+                #print(a)
+                format_str = ('%s: step %d, diff = %f, l2_loss = %f, lambda = %f')
+                print (format_str % (datetime.now(), iter, diff, l2, 0.0))
+            """
+            if sraf_changed > max_perturbation:
+                break
 
+            if diff < 0 and iter % 5 ==0:
+                sraf_changed+=1
+                a = t_alpha.eval()
+                if sraf_changed>1:
+                    a[np.array(indices)]=0
+                idx = np.argmax(a)
+                indices.append(idx)
+                print (indices)
+                #mxtmp =min(max_perturbation,np.sum(int(b>alpha_threshold)))
+                #if mxtmp ==0:
+                #    mxtmp=max_perturbation
+                #for i in range(max_perturbation):
+
+                img_tmp=np.copy(X[idx])
+                X[idx] = 0
+                img_tmp=img_tmp.astype(int)
+                img = img + np.expand_dims(img_tmp,0)
+                print(np.max(img), np.min(img))
+                print(img.shape)
                 
+                diff = fwd2.eval(feed_dict={input_placeholder: img})
+                print(diff)
                 if diff < 0:
-                    a = t_alpha.eval()
-                    idx = []
-                    b = np.copy(a)
-                    #mxtmp =min(max_perturbation,np.sum(int(b>alpha_threshold)))
-                    #if mxtmp ==0:
-                    #    mxtmp=max_perturbation
-                    for i in range(max_perturbation):
-                        idx.append(np.argmax(b))
-                        b[idx[-1]]=0
-                        c = np.zeros(a.shape)
-                        c[idx] = 1.0
-                        img_tmp=img
-                        for j in range(len(c)):
-                            img_tmp += c[j]*X[j]
-                        img_tmp=img_tmp.astype(int)
-                        print(np.max(img_tmp), np.min(img_tmp))
-                        print(img_tmp.shape)
-                        diff = fwd2.eval(feed_dict={input_placeholder: img_tmp})
-                        if diff < 0:
-                            print(diff)
-                            #print(np.min(img_tmp))
-                            #aimg = generate_adversarial_image(img, X, c)
-                            #v_input_images = []
-                            #fe = feature(aimg, blocksize, blockdim, fealen)
-                            #v_input_images.append(np.rollaxis(fe, 0, 3))
-                            #v_input_images = np.asarray(v_input_images)
-                            #v_diff = v_fwd.eval(feed_dict={v_input_merged: aimg})
-                            #im = input_merged.eval(feed_dict={input_placeholder: input_images, t_X: X})
-                            #print("dis: ")
-                            #print(np.sum(im-v_input_images))
-                            #if v_diff > 0:
-                            #   print("False attack")
-                            #    continue
-                            #cv2.imwrite(img_save_dir+str(target_idx)+'.png', aimg)
-                            #sraf_changed[] = i
-                            iteration_used[iter-1] += 1
-                            print("ATTACK SUCCEED: sarfs add: "+str(len(idx))+", iterations: "+str(iter))
-                            print("****************")
-                            end=time.time()
-                            cv2.imwrite(os.path.join(img_save_dir,str(target_idx)+'.png'), img_tmp[0,:,:,0]*255)
-                            print("Attack runtime is: ", end-start)
-                            return 1
-                        else:
-                            #print (a.flatten())
-                            print (diff)
+                    #print(diff)
+                    #print(np.min(img_tmp))
+                    #aimg = generate_adversarial_image(img, X, c)
+                    #v_input_images = []
+                    #fe = feature(aimg, blocksize, blockdim, fealen)
+                    #v_input_images.append(np.rollaxis(fe, 0, 3))
+                    #v_input_images = np.asarray(v_input_images)
+                    #v_diff = v_fwd.eval(feed_dict={v_input_merged: aimg})
+                    #im = input_merged.eval(feed_dict={input_placeholder: input_images, t_X: X})
+                    #print("dis: ")
+                    #print(np.sum(im-v_input_images))
+                    #if v_diff > 0:
+                    #   print("False attack")
+                    #    continue
+                    #cv2.imwrite(img_save_dir+str(target_idx)+'.png', aimg)
+                    #sraf_changed[] = i
+                    iteration_used[iter-1] += 1
+                    print("ATTACK SUCCEED: sarfs add: "+str(len(idx))+", iterations: "+str(iter))
+                    print("****************")
+                    end=time.time()
+                    cv2.imwrite(os.path.join(img_save_dir,str(target_idx)+'.png'), img[0,:,:,0]*255)
+                    print("Attack runtime is: ", end-start)
+                    return 1
 
+                
+
+            """
+            if diff < -0.01:
+                #sraf_changed+=1
+                a = t_alpha.eval()
+                idx = []
+                b = np.copy(a)
+                #mxtmp =min(max_perturbation,np.sum(int(b>alpha_threshold)))
+                if iter < max_iter-1:
+                    mxtmp=max_perturbation
+                else:
+                    mxtmp= len(X)
+                img_tmp=np.copy(img)
+                for i in range(mxtmp):
+                    idx.append(np.argmax(b))
+                    b[idx[-1]]=0
+                    #c = np.zeros(a.shape)
+                    #c[idx] = 1.0
+                    
+                    #for j in range(len(c)):
+                    img_tmp += X[idx[-1]]
+                    
+                    #img_tmp=img_tmp+img
+                    #print(np.max(img_tmp), np.min(img_tmp))
+                    assert(np.max(img_tmp)==1)
+                    assert(np.min(img_tmp)==0)
+                    #print(img_tmp.shape)
+                    diff = fwd2.eval(feed_dict={input_placeholder: img_tmp.astype(int)})
+                    if diff < 0:
+                        print(diff)
+                        #print(np.min(img_tmp))
+                        #aimg = generate_adversarial_image(img, X, c)
+                        #v_input_images = []
+                        #fe = feature(aimg, blocksize, blockdim, fealen)
+                        #v_input_images.append(np.rollaxis(fe, 0, 3))
+                        #v_input_images = np.asarray(v_input_images)
+                        #v_diff = v_fwd.eval(feed_dict={v_input_merged: aimg})
+                        #im = input_merged.eval(feed_dict={input_placeholder: input_images, t_X: X})
+                        #print("dis: ")
+                        #print(np.sum(im-v_input_images))
+                        #if v_diff > 0:
+                        #   print("False attack")
+                        #    continue
+                        #cv2.imwrite(img_save_dir+str(target_idx)+'.png', aimg)
+                        #sraf_changed[] = i
+                        iteration_used[iter-1] += 1
+                        print("ATTACK SUCCEED: sarfs add: "+str(len(idx))+", iterations: "+str(iter))
+                        print("****************")
+                        end=time.time()
+                        cv2.imwrite(os.path.join(img_save_dir,str(target_idx)+'.png'), img_tmp[0,:,:,0]*255)
+                        print("Attack runtime is: ", end-start)
+                        return 1
+                print(diff)
+            
             #if iter%10==0:
             #    lr=lr*0.5
         print("max iteration reached")
@@ -548,7 +605,8 @@ def attack(target_idx, is_softmax=False):
         print("****************")
         return 0
 
-
+attack(2, is_softmax=False)
+quit()
 success = 0
 total = 0
 for id in idx[0]:

@@ -14,9 +14,11 @@ via_clean:
 
 
 via%_20:
+	rm -rf dct/20/attack$*/*
 	srun -p gpu_24h --gres=gpu:1 python3 dct_attack.py dct_config20$*.ini |& tee dct/20/attack$*/log.txt&
 
 via%_3:
+	rm -rf dct/3/attack$*/*
 	srun -p gpu_24h --gres=gpu:1 python3 dct_attack.py dct_config03$*.ini |& tee dct/3/attack$*/log.txt&
  
 
