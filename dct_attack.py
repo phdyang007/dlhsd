@@ -605,8 +605,8 @@ def attack(target_idx, is_softmax=False):
         print("****************")
         return 0
 
-attack(2, is_softmax=False)
-quit()
+#attack(2, is_softmax=False)
+#quit()
 success = 0
 total = 0
 for id in idx[0]:
