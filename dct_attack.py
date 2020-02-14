@@ -88,9 +88,10 @@ def _generate_sraf_add(img, vias, srafs, insert_shape=[40,90], save_img=False, s
         for j in range(1, black_img.shape[1]-1):
             if black_img[i][j] == 0:
                 continue
-            shape = np.random.randint(insert_shape[0], high=insert_shape[1]+1, size=2)
+            #shape = np.random.randint(insert_shape[0], high=insert_shape[1]+1, size=2)
+            
+            shape = np.array([90,90])
             shape[np.random.randint(0,high=2)] = 40
-            #shape = np.array([40,40])
             if i+shape[0] <= black_img.shape[0] and j+shape[1] <= black_img.shape[1] and np.all(black_img[i:i+shape[0],j:j+shape[1]] == 255):
                 img = np.copy(black_img_)
                 img[i:i+shape[0],j:j+shape[1]] = 255
@@ -387,10 +388,10 @@ def attack(target_idx, is_softmax=False):
     X=np.expand_dims(X, -1)/255
     t_X = tf.placeholder(dtype=tf.float32, shape=[max_candidates, imgdim, imgdim, 1])
     if not is_softmax:
-        alpha = -10.0 + np.zeros((max_candidates,1))
-        la = 1e5
-        t_alpha = tf.sigmoid(tf.cast(tf.get_variable(name='alpha', initializer=alpha), tf.float32))
-        #t_la = tf.cast(tf.Variable(la, name='t_la'), tf.float32)
+        alpha = -10 + np.zeros((max_candidates,1))
+        la = 1e3
+        t_alpha = tf.sigmoid(tf.cast(tf.get_variable(name='t_alpha', initializer=alpha), tf.float32))
+        t_la = tf.cast(tf.Variable(la, name='t_la'), tf.float32)
     else:
         alpha = np.zeros(max_candidates)
         t_alpha = tf.nn.softmax(tf.get_variable(name='t_alpha', initializer=alpha))
@@ -421,13 +422,13 @@ def attack(target_idx, is_softmax=False):
     nhs_pre2, hs_pre2 = tf.split(predict2, [1, 1], 1)
     fwd2 = tf.subtract(hs_pre2, nhs_pre2)
     if not is_softmax:
-        loss = loss_1+  1e5*fwd
+        loss = loss_1+  t_la*fwd
     else:
         #loss = 1e-5*loss_1 + fwd    
         loss = fwd
     t_vars = tf.trainable_variables()
     m_vars = [var for var in t_vars if 'model' in var.name]
-    d_vars = [var for var in t_vars if 'alpha' in var.name]
+    d_vars = [var for var in t_vars if 't_' in var.name]
     opt = tf.train.RMSPropOptimizer(lr).minimize(loss, var_list=d_vars)
 
     '''
@@ -451,13 +452,13 @@ def attack(target_idx, is_softmax=False):
             diff = fwd.eval(feed_dict={input_placeholder: img, t_X: X})
             l2 =loss_1.eval(feed_dict={input_placeholder:img, t_X: X})
             #l=loss.eval(feed_dict={input_placeholder: img, t_X: X})
-            #lambdas =t_la.eval()
+            lambdas =t_la.eval()
             if debug:
                 #print("****************")
                 #print("alpha:")
                 #print(a)
                 format_str = ('%s: step %d, diff = %f, l2_loss = %f, lambda = %f')
-                print (format_str % (datetime.now(), iter, diff, l2, 0.0))
+                print (format_str % (datetime.now(), iter, diff, l2, lambdas))
             """
             if sraf_changed > max_perturbation:
                 break
@@ -523,6 +524,7 @@ def attack(target_idx, is_softmax=False):
                 else:
                     mxtmp= len(X)
                 img_tmp=np.copy(img)
+                cv2.imwrite(os.path.join(img_save_dir,str(target_idx)+'-'+str(0)+'.png'), img_tmp[0,:,:,0]*255)
                 for i in range(mxtmp):
                     idx.append(np.argmax(b))
                     b[idx[-1]]=0
@@ -538,6 +540,8 @@ def attack(target_idx, is_softmax=False):
                     assert(np.min(img_tmp)==0)
                     #print(img_tmp.shape)
                     diff = fwd2.eval(feed_dict={input_placeholder: img_tmp.astype(int)})
+                    cv2.imwrite(os.path.join(img_save_dir,str(target_idx)+'-'+str(i)+'.png'), img_tmp[0,:,:,0]*255)
+                    print(diff)
                     if diff < 0:
                         print(diff)
                         #print(np.min(img_tmp))
@@ -605,8 +609,8 @@ def attack(target_idx, is_softmax=False):
         print("****************")
         return 0
 
-#attack(2, is_softmax=False)
-#quit()
+attack(46, is_softmax=False)
+quit()
 success = 0
 total = 0
 for id in idx[0]:
