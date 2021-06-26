@@ -2,7 +2,7 @@
 
 ## Dataset
 
-Feature Tensor Extraction Data is already within this repo, original images can be found at https://www.cse.cuhk.edu.hk/~byu/files/benchmarks/gdsiccad.zip
+Feature Tensor Extraction Data is already within this repo, original gds can be found at https://www.cse.cuhk.edu.hk/~byu/files/benchmarks/gdsiccad.zip
 
 ## Dependencies
 
