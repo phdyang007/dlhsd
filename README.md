@@ -4,6 +4,8 @@
 
 Feature Tensor Extraction Data is already within this repo, original gds can be found at https://www.cse.cuhk.edu.hk/~byu/files/benchmarks/gdsiccad.zip
 
+See also the rasterized images https://huggingface.co/datasets/phdyang007/ICCAD12/tree/main
+
 ## Dependencies
 
 numpy, tensorflow (tested on 1.3 and 1.9), pandas, json, ConfigParser (configparser for python 3), progress
